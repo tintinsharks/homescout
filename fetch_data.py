@@ -49,7 +49,8 @@ POCKET_NAMES = {
     "BAIR ISLAND": "Bair Island",
     "REDWOOD SHORES": "Redwood Shores",
 }
-TARGET_POCKETS = ["Farm Hills", "Woodside Plaza"]
+TARGET_POCKETS = ["Woodside Plaza", "Selby-Atherwood (county)"]
+CITY_LIMITS_FILE = ROOT / "city_limits.geojson"
 
 
 def fetch_csv(params: str):
@@ -114,11 +115,25 @@ def load_neighborhoods():
     return out
 
 
-def classify(lon, lat, zipcode, hoods) -> str:
+def load_city_limits():
+    gj = json.loads(CITY_LIMITS_FILE.read_text())
+    return [(f["properties"]["NAME"], f["geometry"]) for f in gj["features"]]
+
+
+def classify(lon, lat, zipcode, hoods, limits):
     if lon is not None and lat is not None:
         for name, geom, (x0, y0, x1, y1) in hoods:
             if x0 <= lon <= x1 and y0 <= lat <= y1 and point_in_geom(lon, lat, geom):
                 return name
+        # not in any city neighborhood — check if it's outside city limits entirely
+        in_rwc = any(n == "REDWOOD CITY" and point_in_geom(lon, lat, g) for n, g in limits)
+        if not in_rwc:
+            # unincorporated San Mateo County pockets
+            if zipcode in ("94061", "94027") and lon > -122.245:
+                return "Selby-Atherwood (county)"
+            if zipcode == "94062":
+                return "Emerald Hills (county)"
+            return "Other county"
     if zipcode == "94062":
         return "Emerald Hills (county)"
     if zipcode == "94065":
@@ -149,7 +164,7 @@ def parse_sold_date(s):
         return None
 
 
-def norm_row(r: dict, hoods):
+def norm_row(r: dict, hoods, limits):
     price = to_int(r.get("PRICE"))
     sqft = to_int(r.get("SQUARE FEET"))
     if not price or not sqft:
@@ -157,7 +172,7 @@ def norm_row(r: dict, hoods):
     lat = to_float(r.get("LATITUDE"))
     lon = to_float(r.get("LONGITUDE"))
     zipcode = (r.get("ZIP OR POSTAL CODE") or "").strip()[:5]
-    pocket = classify(lon, lat, zipcode, hoods)
+    pocket = classify(lon, lat, zipcode, hoods, limits)
     url_key = next((k for k in r if k.startswith("URL")), None)
     return {
         "mls": (r.get("MLS#") or "").strip(),
@@ -191,8 +206,30 @@ def dedupe(rows):
     return list(seen.values())
 
 
+def convex_hull(points):
+    """Andrew's monotone chain; points = [(lon, lat)]. For the map overlay."""
+    pts = sorted(set(points))
+    if len(pts) < 3:
+        return pts
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower, upper = [], []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
 def main():
     hoods = load_neighborhoods()
+    limits = load_city_limits()
     today = datetime.now(timezone.utc).date()
 
     print(f"[{datetime.now(timezone.utc).isoformat()}] fetching active listings...")
@@ -210,8 +247,8 @@ def main():
         sold_rows.extend(rows)
         time.sleep(3)
 
-    active = dedupe([x for x in (norm_row(r, hoods) for r in active_rows) if x and not x["sold_date"]])
-    sold = dedupe([x for x in (norm_row(r, hoods) for r in sold_rows) if x and x["sold_date"]])
+    active = dedupe([x for x in (norm_row(r, hoods, limits) for r in active_rows) if x and not x["sold_date"]])
+    sold = dedupe([x for x in (norm_row(r, hoods, limits) for r in sold_rows) if x and x["sold_date"]])
     sold.sort(key=lambda x: x["sold_date"], reverse=True)
     active.sort(key=lambda x: (x["dom"] if x["dom"] is not None else 999))
 
@@ -240,9 +277,17 @@ def main():
         del history[key]
     HISTORY_FILE.write_text(json.dumps(history, indent=1))
 
+    # map overlay for pockets that have no official polygon (e.g. county islands)
+    selby_pts = [(h["lon"], h["lat"]) for h in active + sold
+                 if h["pocket"] == "Selby-Atherwood (county)" and h["lon"]]
+    extra_polys = {}
+    if len(selby_pts) >= 3:
+        extra_polys["Selby-Atherwood (county)"] = convex_hull(selby_pts)
+
     data = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "target_pockets": TARGET_POCKETS,
+        "extra_polys": extra_polys,
         "budget": 3300000,
         "min_sqft_default": 2000,
         "active": active,

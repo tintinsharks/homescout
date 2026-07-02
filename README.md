@@ -1,8 +1,9 @@
 # RWC HomeScout
 
-Private home-search dashboard for Redwood City (Farm Hills & Woodside Plaza focus).
+Private home-search dashboard for Redwood City (Woodside Plaza & Selby-Atherwood focus).
 
 - **Dashboard**: GitHub Pages serves `docs/` → https://tintinsharks.github.io/homescout/
+- **Targets**: Woodside Plaza + Selby-Atherwood (unincorporated San Mateo County island between RWC and Atherton; boundary = convex hull of classified homes, city limits from county GIS `City_Limits` layer)
 - **Data**: `fetch_data.py` pulls active + 365-day sold single-family listings (1800+ sqft)
   from Redfin's CSV download endpoint, classifies each home into official City of
   Redwood City neighborhood polygons (`docs/neighborhoods.geojson`), and tracks price

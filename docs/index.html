@@ -499,14 +499,19 @@ function renderSoldTable() {
 /* ---------- charts ---------- */
 let trendChart = null, scatterChart = null;
 function renderCharts() {
+  const lookback = +($('tRange')?.value || 60);
+  const longSeries = MARKET && MARKET.pocket_ppsf;   // 10y per-pocket $/sqft from market.json
+  const nMonths = (state.customOnly || !longSeries) ? Math.min(lookback, 24) : lookback;
   const months = [];
   const now = new Date(DATA.generated_at);
-  for (let i = 23; i >= 0; i--) {
+  for (let i = nMonths - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     months.push(d.toISOString().slice(0, 7));
   }
+  const longData = p => months.map(m => (longSeries[p] && longSeries[p][m]) ? longSeries[p][m][0] : null);
   let series;
   if (state.customOnly) {
+    // drawn zones have no precomputed series — compute from the 24-mo comp data
     series = [{
       label: 'My drawn area', borderColor: '#dc2626', backgroundColor: '#dc2626',
       spanGaps: true, tension: 0.25,
@@ -519,22 +524,25 @@ function renderCharts() {
       label: p,
       borderColor: colorFor(p),
       backgroundColor: colorFor(p),
-      spanGaps: true, tension: 0.25,
-      data: months.map(m => median(DATA.sold.filter(h => h.pocket === p && h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
+      spanGaps: true, tension: 0.25, pointRadius: nMonths > 30 ? 0 : 2,
+      data: longSeries ? longData(p)
+        : months.map(m => median(DATA.sold.filter(h => h.pocket === p && h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
     }));
   }
   series.push({
-    label: 'All RWC', borderColor: '#9aa4b5', backgroundColor: '#9aa4b5', borderDash: [6, 4],
-    spanGaps: true, tension: 0.25,
-    data: months.map(m => median(DATA.sold.filter(h => h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
+    label: 'All coverage', borderColor: '#9aa4b5', backgroundColor: '#9aa4b5', borderDash: [6, 4],
+    spanGaps: true, tension: 0.25, pointRadius: nMonths > 30 ? 0 : 2,
+    data: (longSeries && !state.customOnly) ? longData('All coverage')
+      : months.map(m => median(DATA.sold.filter(h => h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
   });
   if (trendChart) trendChart.destroy();
   trendChart = new Chart($('trendChart'), {
     type: 'line',
     data: { labels: months, datasets: series },
-    options: { maintainAspectRatio: false,
-      plugins: { title: { display: true, text: 'Median sold $/sqft by month (2000+ sqft)' }, legend: { position: 'bottom' } },
-      scales: { y: { ticks: { callback: v => '$' + v } } } }
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { title: { display: true, text: `Median sold $/sqft by month (${Math.round(nMonths / 12)} yr)` }, legend: { position: 'bottom' } },
+      scales: { y: { ticks: { callback: v => '$' + v } },
+                x: { ticks: { maxTicksLimit: 12 } } } }
   });
 
   const solds = DATA.sold.filter(h => passFilters(h, false));
@@ -838,6 +846,7 @@ $('chipCustom').onclick = () => {
 };
 ['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold', 'fYearMin', 'fYearMax', 'fLots'].forEach(id => $(id).onchange = renderAll);
 $('mktScope').onchange = renderMarket;
+$('tRange').onchange = renderCharts;
 $('mFit').onclick = () => { if (lastShownPts.length) MAP.fitBounds(lastShownPts, { padding: [40, 40], maxZoom: 15 }); };
 load();
 setInterval(load, 30 * 60 * 1000); // re-pull data.json every 30 min

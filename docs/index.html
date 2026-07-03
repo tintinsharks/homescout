@@ -52,6 +52,7 @@
   .b.new { background:var(--new); } .b.cut { background:var(--cut); }
   .b.pend { background:var(--pend); } .b.oh { background:var(--accent2); }
   .b.stale { background:#6b7280; } .b.opp { background:#0e7490; } .b.lot { background:#4d7c0f; }
+  .b.fireVH { background:#b91c1c; } .b.fireH { background:#ea580c; } .b.flood { background:#0369a1; }
   tr.comps td { background:#f8fafc; white-space:normal; font-size:12.5px; color:var(--muted); }
   .expand { cursor:pointer; }
   .pos { color:var(--new); font-weight:600; } .neg { color:var(--bad); font-weight:600; }
@@ -94,6 +95,7 @@
     <div class="maptoggle">
       <span class="chip" id="mFit" style="padding:2px 10px">⤢ Fit to results</span>
       <label><input type="checkbox" id="mSold" checked style="width:auto"> show sold (12 mo)</label>
+      <label><input type="checkbox" id="mHaz" style="width:auto"> 🔥🌊 hazard zones</label>
       <span>● sold dot color: <span style="color:#16a34a">green ≤ $950/sqft</span> · <span style="color:#d97706">amber ≤ $1,200</span> · <span style="color:#dc2626">red &gt; $1,200</span></span>
     </div>
   </div>
@@ -182,7 +184,7 @@ const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. C
   'PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village',
   'ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
 let DATA = null, MARKET = null, MAP = null, layerActive = null, layerSold = null, hoodLayer = null, drawLayer = null;
-let tempChart = null, seasonChart = null, lastShownPts = [], lastFitSig = null;
+let tempChart = null, seasonChart = null, lastShownPts = [], lastFitSig = null, hazLayer = null, hazLoaded = false;
 let state = { targetsOnly:true, customOnly:false, pockets:new Set(), sortA:['dom',1], sortS:['sold_date',-1] };
 
 /* ---------- user-drawn zones (persisted in this browser) ---------- */
@@ -292,8 +294,11 @@ function avmCell(h) {
 }
 
 function flagBadge(h) {
-  return (h.opp_flags && h.opp_flags.length)
+  let s = (h.opp_flags && h.opp_flags.length)
     ? `<span class="b opp" title="${h.opp_flags.join(', ')}">🔧</span>` : '';
+  if (h.fire_zone) s += `<span class="b ${h.fire_zone === 'Very High' ? 'fireVH' : 'fireH'}" title="CalFire fire hazard severity: ${h.fire_zone} — expect higher/harder insurance">🔥${h.fire_zone === 'Very High' ? 'VH' : 'H'}</span>`;
+  if (h.flood_zone) s += `<span class="b flood" title="FEMA flood zone ${h.flood_zone}${h.flood_zone === 'X-0.2%' ? ' (moderate: 0.2%/yr)' : ' — flood insurance likely required with a mortgage'}">🌊</span>`;
+  return s;
 }
 
 function detailRow(h, id, colspan) {
@@ -303,6 +308,8 @@ function detailRow(h, id, colspan) {
   if (h.expected_price) bits.push(`<b>Comp value:</b> ${fmtK(h.expected_price)} (${h.n_comps} comps)`);
   if (h.tax) bits.push(`<b>Tax:</b> $${h.tax.toLocaleString()}/yr`);
   if (h.hoa) bits.push(`<b>HOA:</b> $${h.hoa}/mo`);
+  if (h.fire_zone) bits.push(`<b>Fire zone:</b> ${h.fire_zone} (CalFire FHSZ)`);
+  if (h.flood_zone) bits.push(`<b>Flood zone:</b> ${h.flood_zone} (FEMA)`);
   if (h.opp_flags && h.opp_flags.length) bits.push(`<b>Keywords:</b> ${h.opp_flags.join(', ')}`);
   if (h.schools) bits.push(`<b>Schools:</b> ${h.schools}`);
   const remarks = h.remarks ? `<br><i>${h.remarks}</i>` : '';
@@ -848,6 +855,34 @@ $('chipCustom').onclick = () => {
 $('mktScope').onchange = renderMarket;
 $('tRange').onchange = renderCharts;
 $('mFit').onclick = () => { if (lastShownPts.length) MAP.fitBounds(lastShownPts, { padding: [40, 40], maxZoom: 15 }); };
+$('mHaz').onchange = async () => {
+  if ($('mHaz').checked) {
+    if (!hazLoaded) {
+      const gj = await (await fetch('hazards.geojson')).json();
+      hazLayer = L.geoJSON(gj, {
+        style: f => {
+          const p = f.properties;
+          if (p.kind === 'fire') {
+            const vh = p.cls === 'Very High';
+            return { color: vh ? '#b91c1c' : '#ea580c', weight: 0.5,
+                     fillColor: vh ? '#b91c1c' : '#ea580c', fillOpacity: vh ? 0.22 : 0.13 };
+          }
+          const sfha = p.cls !== 'X-0.2%';
+          return { color: '#0369a1', weight: 0.5,
+                   fillColor: '#0369a1', fillOpacity: sfha ? 0.25 : 0.10 };
+        },
+        onEachFeature: (f, l) => l.bindTooltip(
+          f.properties.kind === 'fire'
+            ? `Fire hazard: ${f.properties.cls}` : `Flood zone: ${f.properties.cls}`,
+          { sticky: true })
+      });
+      hazLoaded = true;
+    }
+    hazLayer.addTo(MAP);
+  } else if (hazLayer) {
+    hazLayer.remove();
+  }
+};
 load();
 setInterval(load, 30 * 60 * 1000); // re-pull data.json every 30 min
 </script>

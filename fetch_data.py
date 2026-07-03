@@ -219,8 +219,8 @@ def parse_sold_date(s):
 
 def norm_row(r: dict, hoods, limits):
     price = to_int(r.get("PRICE"))
-    sqft = to_int(r.get("SQUARE FEET"))
-    if not price or not sqft:
+    sqft = to_int(r.get("SQUARE FEET"))   # may be missing on fresh listings
+    if not price:
         return None
     city = (r.get("CITY") or "").strip()
     if city.upper() in EXCLUDE_CITIES:
@@ -242,7 +242,7 @@ def norm_row(r: dict, hoods, limits):
         "lot": to_int(r.get("LOT SIZE")),
         "year": to_int(r.get("YEAR BUILT")),
         "dom": to_int(r.get("DAYS ON MARKET")),
-        "ppsf": round(price / sqft),
+        "ppsf": round(price / sqft) if sqft else None,
         "status": (r.get("STATUS") or "").strip(),
         "sold_date": parse_sold_date(r.get("SOLD DATE")),
         "open_house": (r.get("NEXT OPEN HOUSE START TIME") or "").strip(),
@@ -280,7 +280,7 @@ def gem_score(home, sold, today):
     to the bimodal pricing you get across school-district lines. gem_pct is capped
     at ±35% since anything larger is almost always a data artifact, not a deal.
     """
-    if not home["lat"]:
+    if not home["lat"] or not home.get("sqft"):
         return
     cutoff = (today - timedelta(days=456)).isoformat()
     cands = []
@@ -401,7 +401,7 @@ def main():
             time.sleep(3)
 
     active = dedupe([x for x in (norm_row(r, hoods, limits) for r in active_rows) if x and not x["sold_date"]])
-    sold = dedupe([x for x in (norm_row(r, hoods, limits) for r in sold_rows) if x and x["sold_date"]])
+    sold = dedupe([x for x in (norm_row(r, hoods, limits) for r in sold_rows) if x and x["sold_date"] and x["sqft"]])
     sold.sort(key=lambda x: x["sold_date"], reverse=True)
     active.sort(key=lambda x: (x["dom"] if x["dom"] is not None else 999))
 

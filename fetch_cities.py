@@ -22,19 +22,25 @@ import fetch_data as fd
 from enrich_data import OPP_KEYWORDS
 
 DATA_FILE = fd.DOCS / "data.json"
+# (location, pocket name or None to classify by polygon, also fetch solds?)
+# The core three cities are covered by Redfin for solds, but their ACTIVES are
+# pulled here too: Redfin's CSV endpoint omits some MLS listings by rule, so
+# the active set is the union of both feeds (global de-dupe, Redfin rows win).
 CITIES = [
+    ("Redwood City, CA", None, False), ("Menlo Park, CA", None, False),
+    ("Atherton, CA", None, False),
     # East Bay
-    ("Fremont, CA", "Fremont"), ("Union City, CA", "Union City"),
+    ("Fremont, CA", "Fremont", True), ("Union City, CA", "Union City", True),
     # Peninsula
-    ("San Carlos, CA", "San Carlos"), ("Belmont, CA", "Belmont"),
-    ("San Mateo, CA", "San Mateo"), ("Foster City, CA", "Foster City"),
-    ("Burlingame, CA", "Burlingame"), ("Hillsborough, CA", "Hillsborough"),
-    ("Millbrae, CA", "Millbrae"), ("San Bruno, CA", "San Bruno"),
-    ("South San Francisco, CA", "South San Francisco"),
-    ("Daly City, CA", "Daly City"), ("Pacifica, CA", "Pacifica"),
-    ("Half Moon Bay, CA", "Half Moon Bay"), ("Woodside, CA", "Woodside"),
-    ("Portola Valley, CA", "Portola Valley"), ("Palo Alto, CA", "Palo Alto"),
-    ("East Palo Alto, CA", "East Palo Alto"),
+    ("San Carlos, CA", "San Carlos", True), ("Belmont, CA", "Belmont", True),
+    ("San Mateo, CA", "San Mateo", True), ("Foster City, CA", "Foster City", True),
+    ("Burlingame, CA", "Burlingame", True), ("Hillsborough, CA", "Hillsborough", True),
+    ("Millbrae, CA", "Millbrae", True), ("San Bruno, CA", "San Bruno", True),
+    ("South San Francisco, CA", "South San Francisco", True),
+    ("Daly City, CA", "Daly City", True), ("Pacifica, CA", "Pacifica", True),
+    ("Half Moon Bay, CA", "Half Moon Bay", True), ("Woodside, CA", "Woodside", True),
+    ("Portola Valley, CA", "Portola Valley", True), ("Palo Alto, CA", "Palo Alto", True),
+    ("East Palo Alto, CA", "East Palo Alto", True),
 ]
 SOLD_DAYS = 730
 
@@ -61,12 +67,16 @@ def s(v):
         return str(v)
 
 
-def row_from(r, pocket):
+def row_from(r, pocket, hoods=None, limits=None):
     price = i(r.get("list_price")) or i(r.get("sold_price"))
-    sqft = i(r.get("sqft"))
-    if not price or not sqft:
+    sqft = i(r.get("sqft"))          # may be missing on fresh listings — keep the row
+    if not price:
         return None
     lat, lon = f(r.get("latitude")), f(r.get("longitude"))
+    city = s(r.get("city")).strip()
+    if pocket is None:
+        zc = s(r.get("zip_code"))[:5]
+        pocket = fd.classify(lon, lat, zc, city, hoods or [], limits or [])
     fb, hb = i(r.get("full_baths")) or 0, i(r.get("half_baths")) or 0
     return {
         "mls": s(r.get("mls_id")).strip(),
@@ -80,7 +90,7 @@ def row_from(r, pocket):
         "lot": i(r.get("lot_sqft")),
         "year": i(r.get("year_built")),
         "dom": i(r.get("days_on_mls")),
-        "ppsf": round(price / sqft),
+        "ppsf": round(price / sqft) if sqft else None,
         "status": s(r.get("status")).strip().title(),
         "sold_date": None,
         "open_house": "",
@@ -117,8 +127,10 @@ def main():
     data = json.loads(DATA_FILE.read_text())
     today = datetime.now(timezone.utc).date()
 
+    hoods = fd.load_neighborhoods()
+    limits = fd.load_city_limits()
     eb_active, eb_sold = [], []
-    for loc, pocket in CITIES:
+    for loc, pocket, want_solds in CITIES:
         for lt in ("for_sale", "pending"):
             try:
                 df = scrape_property(location=loc, listing_type=lt,
@@ -127,12 +139,14 @@ def main():
                 print(f"{loc} {lt} failed: {e}", file=sys.stderr)
                 continue
             for _, r in df.iterrows():
-                h = row_from(r, pocket)
-                if not h or h["sqft"] < fd.MIN_SQFT:
+                h = row_from(r, pocket, hoods, limits)
+                if not h:      # actives: keep every size, even missing sqft
                     continue
                 enrich_active(h, r)
                 eb_active.append(h)
             print(f"{loc} {lt}: {len(df)} rows")
+        if not want_solds:     # core cities: Redfin already provides solds
+            continue
         try:
             df = scrape_property(location=loc, listing_type="sold",
                                  property_type=["single_family"], past_days=SOLD_DAYS)
@@ -140,8 +154,9 @@ def main():
             print(f"{loc} sold failed: {e}", file=sys.stderr)
             continue
         for _, r in df.iterrows():
-            h = row_from(r, pocket)
-            if not h or h["sqft"] < fd.MIN_SQFT:      # keep comps relevant + file small
+            h = row_from(r, pocket, hoods, limits)
+            # solds are comps for a 2000+ sqft search: need real size + sane ppsf
+            if not h or not h["sqft"] or h["sqft"] < fd.MIN_SQFT:
                 continue
             h["sold_date"] = iso(r.get("last_sold_date"))
             if not h["sold_date"]:

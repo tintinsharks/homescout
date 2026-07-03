@@ -238,7 +238,7 @@ function passFilters(h, isActive) {
     if (!state.targetsOnly && state.pockets.size && !state.pockets.has(h.pocket)) return false;
   }
   if (h.price > +$('fPrice').value) return false;
-  if (h.sqft < +$('fSqft').value) return false;
+  if (h.sqft != null && h.sqft < +$('fSqft').value) return false;  // unknown sqft stays visible
   if (+$('fBeds').value && (h.beds || 0) < +$('fBeds').value) return false;
   const ymin = +$('fYearMin').value, ymax = +$('fYearMax').value;
   if (h.year != null) {
@@ -382,7 +382,7 @@ function renderOH() {
     html += `<tr><td><b>${h.open_house.replace(/-2\d{3}/, '').replace(/-/g, ' ')}</b></td>
       <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}${flagBadge(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
-      <td>${gemCell(h)}</td><td>${avmCell(h)}</td><td>${h.sqft.toLocaleString()}</td></tr>`;
+      <td>${gemCell(h)}</td><td>${avmCell(h)}</td><td>${h.sqft ? h.sqft.toLocaleString() : '—'}</td></tr>`;
   });
   $('ohTable').innerHTML = html;
 }
@@ -418,7 +418,7 @@ function renderActive(meds) {
       <td>${gemCell(h)}</td>
       <td>${avmCell(h)}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>
-      <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td>
+      <td>${h.sqft ? h.sqft.toLocaleString() : '—'}</td><td>${h.ppsf ? '$' + h.ppsf.toLocaleString() : '—'}</td>
       <td>${h.lot ? h.lot.toLocaleString() : '—'}</td>
       <td>${h.year ?? '—'}</td><td>${h.dom ?? '—'}</td>
       <td class="expand" data-row="ainfo-${i}">▸</td></tr>` + detailRow(h, `ainfo-${i}`, cols.length);
@@ -664,7 +664,7 @@ function popup(h, sold) {
   const gem = (!sold && h.gem_pct != null)
     ? `<br>Comp value ${fmtK(h.expected_price)} → <b class="${h.gem_pct >= 5 ? 'pos' : ''}">${h.gem_pct > 0 ? '+' : ''}${Math.round(h.gem_pct)}% gem</b>` : '';
   return `<b>${h.address}</b><br>${pocketTag(h.pocket, h.target)}<br>
-    ${fmt$(h.price)} · ${h.beds ?? '?'}bd/${h.baths ?? '?'}ba · ${h.sqft.toLocaleString()} sqft · $${h.ppsf}/sqft
+    ${fmt$(h.price)} · ${h.beds ?? '?'}bd/${h.baths ?? '?'}ba · ${h.sqft ? h.sqft.toLocaleString() : '?'} sqft · ${h.ppsf ? '$' + h.ppsf + '/sqft' : ''}
     ${sold ? `<br>Sold ${h.sold_date}` : `<br>${h.status}${h.dom != null ? ' · ' + h.dom + ' DOM' : ''}`}${gem}
     <br><a href="${h.url}" target="_blank">View on Redfin →</a>`;
 }

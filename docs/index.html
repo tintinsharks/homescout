@@ -49,7 +49,7 @@
        color:#fff; margin-left:5px; vertical-align:1px; }
   .b.new { background:var(--new); } .b.cut { background:var(--cut); }
   .b.pend { background:var(--pend); } .b.oh { background:var(--accent2); }
-  .b.stale { background:#6b7280; }
+  .b.stale { background:#6b7280; } .b.opp { background:#0e7490; }
   tr.comps td { background:#f8fafc; white-space:normal; font-size:12.5px; color:var(--muted); }
   .expand { cursor:pointer; }
   .pos { color:var(--new); font-weight:600; } .neg { color:var(--bad); font-weight:600; }
@@ -198,6 +198,39 @@ function gemCell(h) {
   return `<span class="${cls}" title="expected ${fmtK(h.expected_price)} from ${h.n_comps} comps">${h.gem_pct > 0 ? '+' : ''}${Math.round(h.gem_pct)}%</span>`;
 }
 
+function avmCell(h) {
+  if (h.vs_est_pct == null) return '—';
+  const cls = h.vs_est_pct >= 5 ? 'pos' : h.vs_est_pct <= -5 ? 'neg' : '';
+  return `<span class="${cls}" title="Realtor.com estimate ${fmtK(h.est_value)}">${h.vs_est_pct > 0 ? '+' : ''}${Math.round(h.vs_est_pct)}%</span>`;
+}
+
+function flagBadge(h) {
+  return (h.opp_flags && h.opp_flags.length)
+    ? `<span class="b opp" title="${h.opp_flags.join(', ')}">🔧</span>` : '';
+}
+
+function detailRow(h, id, colspan) {
+  const bits = [];
+  if (h.last_sold) bits.push(`<b>Last sold:</b> ${h.last_sold} for ${fmtK(h.last_sold_price || 0)}`);
+  if (h.est_value) bits.push(`<b>Realtor AVM:</b> ${fmtK(h.est_value)}`);
+  if (h.expected_price) bits.push(`<b>Comp value:</b> ${fmtK(h.expected_price)} (${h.n_comps} comps)`);
+  if (h.tax) bits.push(`<b>Tax:</b> $${h.tax.toLocaleString()}/yr`);
+  if (h.hoa) bits.push(`<b>HOA:</b> $${h.hoa}/mo`);
+  if (h.opp_flags && h.opp_flags.length) bits.push(`<b>Keywords:</b> ${h.opp_flags.join(', ')}`);
+  if (h.schools) bits.push(`<b>Schools:</b> ${h.schools}`);
+  const remarks = h.remarks ? `<br><i>${h.remarks}</i>` : '';
+  return `<tr class="comps" id="${id}" style="display:none"><td colspan="${colspan}">${bits.join(' · ') || 'no enrichment data'}${remarks}</td></tr>`;
+}
+
+function wireExpanders(tableId) {
+  document.querySelectorAll(`#${tableId} .expand`).forEach(el => el.onclick = () => {
+    const row = $(el.dataset.row);
+    const open = row.style.display !== 'none';
+    row.style.display = open ? 'none' : '';
+    el.textContent = open ? '▸' : '▾';
+  });
+}
+
 function vsMedian(h, meds) {
   const m = meds[h.pocket];
   if (!m || !m.ppsf) return null;
@@ -247,23 +280,26 @@ function th(cols, table, sortState) {
 function renderActive(meds) {
   const rows = sortRows(DATA.active.filter(h => passFilters(h, true)), ...[state.sortA[0], state.sortA[1]]);
   $('activeCount').textContent = `— ${rows.length} shown`;
-  const cols = [['address','Address'],['pocket','Pocket'],['price','Price'],['gem_pct','Gem'],['beds','Bd'],['baths','Ba'],
-                ['sqft','SqFt'],['ppsf','$/sqft'],['lot','Lot'],['year','Built'],['dom','DOM'],['open_house','Open house']];
+  const cols = [['address','Address'],['pocket','Pocket'],['price','Price'],['gem_pct','Gem'],['vs_est_pct','AVM Δ'],
+                ['beds','Bd'],['baths','Ba'],['sqft','SqFt'],['ppsf','$/sqft'],['lot','Lot'],
+                ['year','Built'],['dom','DOM'],['info','']];
   let html = th(cols, 'A', state.sortA);
-  rows.forEach(h => {
+  rows.forEach((h, i) => {
     html += `<tr>
-      <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}</td>
+      <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}${flagBadge(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td>
       <td><b>${fmt$(h.price)}</b></td>
       <td>${gemCell(h)}</td>
+      <td>${avmCell(h)}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>
       <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td>
       <td>${h.lot ? h.lot.toLocaleString() : '—'}</td>
       <td>${h.year ?? '—'}</td><td>${h.dom ?? '—'}</td>
-      <td>${h.open_house ? h.open_house.replace(/-2026.*/, '').replace('-', ' ') : ''}</td></tr>`;
+      <td class="expand" data-row="ainfo-${i}">▸</td></tr>` + detailRow(h, `ainfo-${i}`, cols.length);
   });
   $('activeTable').innerHTML = html || '';
   if (!rows.length) $('activeTable').innerHTML = '<tr><td class="empty">No active listings match the filters.</td></tr>';
+  wireExpanders('activeTable');
 }
 
 function renderDeals() {
@@ -273,27 +309,22 @@ function renderDeals() {
     $('dealTable').innerHTML = '<tr><td class="empty">No listings priced meaningfully below their comp-based value right now — check back after the next refresh.</td></tr>';
     return;
   }
-  let html = '<tr><th>Address</th><th>Pocket</th><th>Price</th><th>Comp value</th><th>Gem</th><th>SqFt</th><th>$/sqft</th><th>DOM</th><th></th></tr>';
+  let html = '<tr><th>Address</th><th>Pocket</th><th>Price</th><th>Comp value</th><th>Gem</th><th>AVM Δ</th><th>SqFt</th><th>$/sqft</th><th>DOM</th><th></th></tr>';
   rows.forEach((h, i) => {
-    html += `<tr><td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}</td>
+    const comps = (h.comps || []).map(c =>
+      `<a href="${c.url}" target="_blank">${c.address}</a> (${c.pocket}) — sold ${c.sold_date} · ${fmtK(c.price)} · ${c.sqft.toLocaleString()} sqft · $${c.ppsf}/sqft · ${c.dist_m}m away`
+    ).join('<br>') || 'comp details unavailable';
+    html += `<tr><td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}${flagBadge(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
       <td>${fmtK(h.expected_price)}</td>
       <td class="pos"><b>+${Math.round(h.gem_pct)}%</b></td>
+      <td>${avmCell(h)}</td>
       <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td><td>${h.dom ?? '—'}</td>
-      <td class="expand" data-i="${i}">▸ comps</td></tr>
-      <tr class="comps" id="comps-${i}" style="display:none"><td colspan="9">${
-        (h.comps || []).map(c =>
-          `<a href="${c.url}" target="_blank">${c.address}</a> (${c.pocket}) — sold ${c.sold_date} · ${fmtK(c.price)} · ${c.sqft.toLocaleString()} sqft · $${c.ppsf}/sqft · ${c.dist_m}m away`
-        ).join('<br>') || 'comp details unavailable'
-      }</td></tr>`;
+      <td class="expand" data-row="comps-${i}">▸</td></tr>
+      <tr class="comps" id="comps-${i}" style="display:none"><td colspan="10">${comps}</td></tr>`;
   });
   $('dealTable').innerHTML = html;
-  document.querySelectorAll('#dealTable .expand').forEach(el => el.onclick = () => {
-    const row = $('comps-' + el.dataset.i);
-    const open = row.style.display !== 'none';
-    row.style.display = open ? 'none' : '';
-    el.textContent = open ? '▸ comps' : '▾ comps';
-  });
+  wireExpanders('dealTable');
 }
 
 function renderSoldTable() {

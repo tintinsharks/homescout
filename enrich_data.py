@@ -118,6 +118,9 @@ def main():
             ld = r.get("list_date")
             if ld is not None and not pd.isna(ld):
                 h["list_date"] = str(ld)[:10]
+            dm = to_i(r.get("days_on_mls"))       # Redfin leaves DOM blank for solds
+            if dm is not None and 0 <= dm <= 400:
+                h["dom"] = dm
         print(f"sale-to-list attached to {n} sold rows")
     except Exception as e:
         print(f"sold enrich failed: {e}", file=sys.stderr)

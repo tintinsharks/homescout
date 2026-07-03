@@ -461,13 +461,14 @@ function renderSoldTable() {
   const rows = sortRows(DATA.sold.filter(h => passFilters(h, false)), ...[state.sortS[0], state.sortS[1]]).slice(0, 150);
   $('soldCount').textContent = `— ${rows.length} shown (max 150)`;
   const cols = [['sold_date','Sold'],['address','Address'],['pocket','Pocket'],['price','Price'],
-                ['s2l','vs list'],['beds','Bd'],['baths','Ba'],['sqft','SqFt'],['ppsf','$/sqft'],['year','Built']];
+                ['s2l','vs list'],['dom','DOM'],['beds','Bd'],['baths','Ba'],['sqft','SqFt'],['ppsf','$/sqft'],['year','Built']];
   let html = th(cols, 'S', state.sortS);
   rows.forEach(h => {
     html += `<tr><td>${h.sold_date}</td>
       <td><a href="${h.url}" target="_blank">${h.address}</a></td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
       <td>${vsListCell(h)}</td>
+      <td title="days on market">${h.dom ?? '—'}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>
       <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td><td>${h.year ?? '—'}</td></tr>`;
   });

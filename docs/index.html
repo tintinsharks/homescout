@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RWC HomeScout</title>
+<title>HomeScout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -69,8 +69,8 @@
 </head>
 <body>
 <header>
-  <h1>🏡 RWC HomeScout</h1>
-  <span class="sub">Woodside Plaza · Selby-Atherwood · Menlo Park focus · 2000+ sqft · data refreshes every 4 h</span>
+  <h1>🏡 HomeScout</h1>
+  <span class="sub">Peninsula (Woodside Plaza · Selby-Atherwood · Menlo Park) + East Bay (Fremont · Union City) · 2000+ sqft · refreshes every 4 h</span>
   <span class="refresh" id="updated"></span>
 </header>
 <main>
@@ -91,13 +91,14 @@
     <h2>Map <span class="hint">— shaded = target pockets · pins = active · dots = sold · use the ⬠ tool (top-left) to draw your own search area</span></h2>
     <div id="map"></div>
     <div class="maptoggle">
+      <span class="chip" id="mFit" style="padding:2px 10px">⤢ Fit to results</span>
       <label><input type="checkbox" id="mSold" checked style="width:auto"> show sold (12 mo)</label>
       <span>● sold dot color: <span style="color:#16a34a">green ≤ $950/sqft</span> · <span style="color:#d97706">amber ≤ $1,200</span> · <span style="color:#dc2626">red &gt; $1,200</span></span>
     </div>
   </div>
 
   <div class="panel">
-    <h2>🔥 Deal radar <span class="hint">— priced below comp-based value (10 nearest sold comps, weighted by distance, size & recency)</span></h2>
+    <h2>🔥 Deal radar <span class="hint">— priced below comp-based value (median $/sqft of the 12 nearest sold comps by distance, size & recency)</span></h2>
     <div class="twrap"><table id="dealTable"></table></div>
   </div>
 
@@ -127,7 +128,7 @@
   <div class="panel">
     <h2>🌡️ Market temperature <span class="hint">— buyer's ↔ seller's market: 0–100 blend of sale-to-list %, % over asking & days-on-market</span></h2>
     <label style="font-size:13px;color:var(--muted)">Area
-      <select id="mktScope"><option>Targets</option><option>Redwood City</option><option>Menlo Park</option></select></label>
+      <select id="mktScope"><option>Targets</option><option>Redwood City</option><option>Menlo Park</option><option>East Bay</option></select></label>
     <div id="tempGauge" style="margin:14px 0"></div>
     <div class="chartbox" style="height:260px"><canvas id="tempChart"></canvas></div>
   </div>
@@ -159,7 +160,8 @@ const POCKET_COLORS = {
   'Emerald Hills (county)':'#7c3aed','Mount Carmel':'#db2777','Canyon':'#ca8a04',
   'Eagle Hill':'#0891b2','Edgewood Park':'#4f46e5','Redwood Oaks':'#65a30d',
   'Roosevelt':'#e11d48','Redwood Shores':'#64748b',
-  'Menlo Park':'#059669','West Menlo (county)':'#c026d3','Atherton':'#7c2d12','Woodside':'#78716c'
+  'Menlo Park':'#059669','West Menlo (county)':'#c026d3','Atherton':'#7c2d12','Woodside':'#78716c',
+  'Fremont':'#be123c','Union City':'#a16207'
 };
 const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel',
   'EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central',
@@ -167,7 +169,7 @@ const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. C
   'PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village',
   'ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
 let DATA = null, MARKET = null, MAP = null, layerActive = null, layerSold = null, hoodLayer = null, drawLayer = null;
-let tempChart = null, seasonChart = null;
+let tempChart = null, seasonChart = null, lastShownPts = [], lastFitSig = null;
 let state = { targetsOnly:true, customOnly:false, pockets:new Set(), sortA:['dom',1], sortS:['sold_date',-1] };
 
 /* ---------- user-drawn zones (persisted in this browser) ---------- */
@@ -718,12 +720,24 @@ function renderMap() {
   }
   layerSold.addTo(MAP);
   layerActive = L.layerGroup();
+  const shownPts = [];
   DATA.active.filter(h => passFilters(h, true) && h.lat).forEach(h => {
     const color = isNew(h) ? '#16a34a' : priceCut(h) ? '#d97706' : '#2563eb';
     L.circleMarker([h.lat, h.lon], { radius: 9, color: '#fff', fillColor: color, fillOpacity: 0.95, weight: 2 })
       .bindPopup(popup(h, false)).addTo(layerActive);
+    shownPts.push([h.lat, h.lon]);
   });
   layerActive.addTo(MAP);
+  lastShownPts = shownPts;
+  // auto-fit when the visible set jumps to a different region (e.g. East Bay)
+  if (shownPts.length && fitSignature() !== lastFitSig) {
+    MAP.fitBounds(shownPts, { padding: [40, 40], maxZoom: 14 });
+    lastFitSig = fitSignature();
+  }
+}
+
+function fitSignature() {
+  return (state.customOnly ? 'custom' : state.targetsOnly ? 'targets' : [...state.pockets].sort().join(','));
 }
 
 /* ---------- filters & wiring ---------- */
@@ -788,6 +802,7 @@ $('chipCustom').onclick = () => {
 };
 ['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold', 'fYearMin', 'fYearMax'].forEach(id => $(id).onchange = renderAll);
 $('mktScope').onchange = renderMarket;
+$('mFit').onclick = () => { if (lastShownPts.length) MAP.fitBounds(lastShownPts, { padding: [40, 40], maxZoom: 15 }); };
 load();
 setInterval(load, 30 * 60 * 1000); // re-pull data.json every 30 min
 </script>

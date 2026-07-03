@@ -12,6 +12,7 @@ Run every 4 hours via cron (see update.sh). Stdlib only.
 import csv
 import io
 import json
+import statistics as st
 import sys
 import time
 import urllib.request
@@ -142,6 +143,11 @@ def load_city_limits():
 
 
 def classify(lon, lat, zipcode, city, hoods, limits):
+    cu = city.upper()
+    if cu == "FREMONT":
+        return "Fremont"
+    if cu == "UNION CITY":
+        return "Union City"
     if lon is not None and lat is not None:
         for name, geom, (x0, y0, x1, y1) in hoods:
             if x0 <= lon <= x1 and y0 <= lat <= y1 and point_in_geom(lon, lat, geom):
@@ -254,9 +260,11 @@ def haversine_m(lat1, lon1, lat2, lon2):
 def gem_score(home, sold, today):
     """Comp-based expected price for an active listing.
 
-    Comps: sold ≤15 months ago, sqft within 0.75x–1.35x, same pocket or ≤1.2 km.
-    Each comp weighted by recency, size closeness, distance, same-pocket bonus;
-    expected $/sqft = weighted mean of the top-10 comps.
+    Comps: sold ≤15 months ago, sqft within 0.75x–1.35x, same pocket or ≤1.2 km,
+    and plausible $/sqft (guards against bad-data comps). Expected $/sqft is the
+    MEDIAN of the top-12 comps' $/sqft — robust to a single mis-keyed outlier and
+    to the bimodal pricing you get across school-district lines. gem_pct is capped
+    at ±35% since anything larger is almost always a data artifact, not a deal.
     """
     if not home["lat"]:
         return
@@ -264,6 +272,8 @@ def gem_score(home, sold, today):
     cands = []
     for s in sold:
         if not s["sold_date"] or s["sold_date"] < cutoff or not s["lat"]:
+            continue
+        if not (200 <= s["ppsf"] <= 3000):          # drop bad-data comps
             continue
         if not (0.75 * home["sqft"] <= s["sqft"] <= 1.35 * home["sqft"]):
             continue
@@ -278,14 +288,13 @@ def gem_score(home, sold, today):
             * (1.6 if same else 1.0)
         cands.append((w, dist, s))
     cands.sort(key=lambda x: -x[0])
-    top = cands[:10]
+    top = cands[:12]
     if len(top) < 4:
         return
-    wsum = sum(w for w, _, _ in top)
-    exp_ppsf = sum(w * s["ppsf"] for w, _, s in top) / wsum
+    exp_ppsf = st.median([s["ppsf"] for _, _, s in top])
     expected = int(exp_ppsf * home["sqft"])
     home["expected_price"] = expected
-    home["gem_pct"] = round((expected - home["price"]) / expected * 100, 1)
+    home["gem_pct"] = max(-35.0, min(35.0, round((expected - home["price"]) / expected * 100, 1)))
     home["n_comps"] = len(top)
     home["comps"] = [{
         "address": s["address"], "sold_date": s["sold_date"], "price": s["price"],
@@ -370,7 +379,7 @@ def main():
         time.sleep(2)
         print(f"{name}: fetching sold (730d) by price band...")
         for band in bands:
-            rows = fetch_csv(region, f"sold_within_days=730&{band}")
+            rows = fetch_csv(region, f"sold_within_days=730&min_sqft={MIN_SQFT}&{band}")
             print(f"  {band}: {len(rows)} rows")
             if len(rows) >= 350:
                 print(f"  WARNING: {name} {band} hit the 350-row cap; results may be truncated", file=sys.stderr)

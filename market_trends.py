@@ -82,7 +82,9 @@ def scope_of(pocket):
     buckets = []
     if pocket in fd.TARGET_POCKETS:
         buckets.append("Targets")
-    if pocket in ("Menlo Park", "West Menlo (county)"):
+    if pocket in ("Fremont", "Union City"):
+        buckets.append("East Bay")
+    elif pocket in ("Menlo Park", "West Menlo (county)"):
         buckets.append("Menlo Park")
     else:
         buckets.append("Redwood City")  # RWC + its county islands
@@ -125,7 +127,7 @@ def main():
     # ---- Realtor/HomeHarvest: 3y sale-to-list + days-on-market ----
     s2l = defaultdict(lambda: defaultdict(list))       # month->scope->[ratio%]
     over = defaultdict(lambda: defaultdict(list))       # month->scope->[0/1]
-    for loc in ("Redwood City, CA", "Menlo Park, CA"):
+    for loc in ("Redwood City, CA", "Menlo Park, CA", "Fremont, CA", "Union City, CA"):
         try:
             df = scrape_property(location=loc, listing_type="sold",
                                  property_type=["single_family"], past_days=S2L_DAYS)
@@ -155,7 +157,7 @@ def main():
 
     # ---- assemble monthly series + seasonality ----
     all_months = sorted(set(ppsf) | set(s2l))
-    scopes = ["Targets", "Redwood City", "Menlo Park"]
+    scopes = ["Targets", "Redwood City", "Menlo Park", "East Bay"]
     monthly = {s: [] for s in scopes}
     seas_acc = {s: defaultdict(lambda: defaultdict(list)) for s in scopes}  # scope->cal_month->metric->[vals]
 

@@ -7,6 +7,8 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -74,6 +76,7 @@
 <main>
   <div class="filters" id="filters">
     <span class="chip" id="chipTargets">🎯 Targets only</span>
+    <span class="chip" id="chipCustom" title="Filter to areas you draw on the map">✏️ My drawn area</span>
     <span id="pocketChips"></span>
     <label>Max price <input type="number" id="fPrice" value="3300000" step="50000"></label>
     <label>Min sqft <input type="number" id="fSqft" value="2000" step="100"></label>
@@ -84,7 +87,7 @@
   <div class="cards" id="kpis"></div>
 
   <div class="panel">
-    <h2>Map <span class="hint">— shaded = target pockets · pins = active · dots = sold (click anything for details)</span></h2>
+    <h2>Map <span class="hint">— shaded = target pockets · pins = active · dots = sold · use the ⬠ tool (top-left) to draw your own search area</span></h2>
     <div id="map"></div>
     <div class="maptoggle">
       <label><input type="checkbox" id="mSold" checked style="width:auto"> show sold (12 mo)</label>
@@ -137,8 +140,35 @@ const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. C
   'CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks',
   'PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village',
   'ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
-let DATA = null, MAP = null, layerActive = null, layerSold = null, hoodLayer = null;
-let state = { targetsOnly:true, pockets:new Set(), sortA:['dom',1], sortS:['sold_date',-1] };
+let DATA = null, MAP = null, layerActive = null, layerSold = null, hoodLayer = null, drawLayer = null;
+let state = { targetsOnly:true, customOnly:false, pockets:new Set(), sortA:['dom',1], sortS:['sold_date',-1] };
+
+/* ---------- user-drawn zones (persisted in this browser) ---------- */
+function loadZones() {
+  try { return JSON.parse(localStorage.getItem('hs_zones') || '[]'); } catch (e) { return []; }
+}
+function saveZones() {
+  const zs = [];
+  drawLayer.eachLayer(l => zs.push(l.getLatLngs()[0].map(p => [p.lat, p.lng])));
+  localStorage.setItem('hs_zones', JSON.stringify(zs));
+}
+function zoneRings() {
+  const zs = [];
+  if (drawLayer) drawLayer.eachLayer(l => zs.push(l.getLatLngs()[0]));
+  return zs;
+}
+function inZones(h) {
+  if (!h.lat) return false;
+  return zoneRings().some(ring => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const yi = ring[i].lat, xi = ring[i].lng, yj = ring[j].lat, xj = ring[j].lng;
+      if ((yi > h.lat) !== (yj > h.lat) &&
+          h.lon < (xj - xi) * (h.lat - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  });
+}
 
 const median = a => { if (!a.length) return null; const s=[...a].sort((x,y)=>x-y);
   const m = Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; };
@@ -165,8 +195,12 @@ function pocketMedians() {
 }
 
 function passFilters(h, isActive) {
-  if (state.targetsOnly && !h.target) return false;
-  if (!state.targetsOnly && state.pockets.size && !state.pockets.has(h.pocket)) return false;
+  if (state.customOnly) {
+    if (!inZones(h)) return false;
+  } else {
+    if (state.targetsOnly && !h.target) return false;
+    if (!state.targetsOnly && state.pockets.size && !state.pockets.has(h.pocket)) return false;
+  }
   if (h.price > +$('fPrice').value) return false;
   if (h.sqft < +$('fSqft').value) return false;
   if (+$('fBeds').value && (h.beds || 0) < +$('fBeds').value) return false;
@@ -247,7 +281,8 @@ function renderKPIs(meds) {
   const newCount = act.filter(isNew).length;
   const cutCount = act.filter(h => priceCut(h) > 0).length;
   const scope = state.targetsOnly ? DATA.target_pockets : [...state.pockets];
-  const inScope = h => (scope.length ? scope.includes(h.pocket) : true) && h.sqft >= 2000;
+  const inScope = h => (state.customOnly ? inZones(h)
+    : (scope.length ? scope.includes(h.pocket) : true)) && h.sqft >= 2000;
   const cut12 = monthsAgoISO(12);
   const last12 = DATA.sold.filter(h => inScope(h) && h.sold_date >= cut12);
   const prior12 = DATA.sold.filter(h => inScope(h) && h.sold_date < cut12);
@@ -352,15 +387,24 @@ function renderCharts() {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     months.push(d.toISOString().slice(0, 7));
   }
-  const scope = state.targetsOnly ? DATA.target_pockets
-    : (state.pockets.size ? [...state.pockets] : DATA.target_pockets);
-  const series = scope.map(p => ({
-    label: p,
-    borderColor: POCKET_COLORS[p] || '#888',
-    backgroundColor: POCKET_COLORS[p] || '#888',
-    spanGaps: true, tension: 0.25,
-    data: months.map(m => median(DATA.sold.filter(h => h.pocket === p && h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
-  }));
+  let series;
+  if (state.customOnly) {
+    series = [{
+      label: 'My drawn area', borderColor: '#dc2626', backgroundColor: '#dc2626',
+      spanGaps: true, tension: 0.25,
+      data: months.map(m => median(DATA.sold.filter(h => inZones(h) && h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
+    }];
+  } else {
+    const scope = state.targetsOnly ? DATA.target_pockets
+      : (state.pockets.size ? [...state.pockets] : DATA.target_pockets);
+    series = scope.map(p => ({
+      label: p,
+      borderColor: POCKET_COLORS[p] || '#888',
+      backgroundColor: POCKET_COLORS[p] || '#888',
+      spanGaps: true, tension: 0.25,
+      data: months.map(m => median(DATA.sold.filter(h => h.pocket === p && h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
+    }));
+  }
   series.push({
     label: 'All RWC', borderColor: '#9aa4b5', backgroundColor: '#9aa4b5', borderDash: [6, 4],
     spanGaps: true, tension: 0.25,
@@ -444,6 +488,29 @@ function renderMap() {
         { color: c, weight: 2.2, fillColor: c, fillOpacity: 0.13 })
         .bindTooltip(nm, { sticky: true }).addTo(MAP);
     });
+    // user-drawn zones
+    drawLayer = new L.FeatureGroup().addTo(MAP);
+    loadZones().forEach(ring => drawLayer.addLayer(
+      L.polygon(ring, { color: '#dc2626', weight: 2, fillColor: '#dc2626', fillOpacity: 0.08, dashArray: '6 4' })));
+    MAP.addControl(new L.Control.Draw({
+      position: 'topleft',
+      draw: { polygon: { shapeOptions: { color: '#dc2626', weight: 2, fillOpacity: 0.08, dashArray: '6 4' },
+                         allowIntersection: false, showArea: false },
+              polyline: false, rectangle: false, circle: false, marker: false, circlemarker: false },
+      edit: { featureGroup: drawLayer }
+    }));
+    MAP.on(L.Draw.Event.CREATED, e => {
+      drawLayer.addLayer(e.layer);
+      saveZones();
+      state.customOnly = true; state.targetsOnly = false;
+      renderAll();
+    });
+    MAP.on(L.Draw.Event.EDITED, () => { saveZones(); renderAll(); });
+    MAP.on(L.Draw.Event.DELETED, () => {
+      saveZones();
+      if (!zoneRings().length) { state.customOnly = false; state.targetsOnly = true; }
+      renderAll();
+    });
   }
   if (layerActive) layerActive.remove();
   if (layerSold) layerSold.remove();
@@ -469,7 +536,7 @@ function renderMap() {
 function renderPocketChips() {
   const pockets = [...new Set([...DATA.active, ...DATA.sold].map(h => h.pocket))].sort();
   $('pocketChips').innerHTML = pockets.map(p =>
-    `<span class="chip pk${state.pockets.has(p) ? ' on' : ''}" data-p="${p}" style="${state.targetsOnly ? 'opacity:.4;pointer-events:none' : ''}">${p}</span>`).join(' ');
+    `<span class="chip pk${state.pockets.has(p) ? ' on' : ''}" data-p="${p}" style="${(state.targetsOnly || state.customOnly) ? 'opacity:.4;pointer-events:none' : ''}">${p}</span>`).join(' ');
   document.querySelectorAll('.chip.pk').forEach(el => el.onclick = () => {
     const p = el.dataset.p;
     state.pockets.has(p) ? state.pockets.delete(p) : state.pockets.add(p);
@@ -480,6 +547,7 @@ function renderPocketChips() {
 function renderAll() {
   const meds = pocketMedians();
   $('chipTargets').classList.toggle('on', state.targetsOnly);
+  $('chipCustom').classList.toggle('on', state.customOnly);
   renderPocketChips();
   renderKPIs(meds);
   renderDeals();
@@ -505,7 +573,21 @@ async function load() {
   renderAll();
 }
 
-$('chipTargets').onclick = () => { state.targetsOnly = !state.targetsOnly; renderAll(); };
+$('chipTargets').onclick = () => {
+  state.targetsOnly = !state.targetsOnly;
+  if (state.targetsOnly) state.customOnly = false;
+  renderAll();
+};
+$('chipCustom').onclick = () => {
+  if (!state.customOnly && !zoneRings().length) {
+    $('map').scrollIntoView({ behavior: 'smooth' });
+    if (MAP && L.Draw) new L.Draw.Polygon(MAP, { shapeOptions: { color: '#dc2626', weight: 2, fillOpacity: 0.08, dashArray: '6 4' } }).enable();
+    return; // customOnly turns on automatically when the polygon is finished
+  }
+  state.customOnly = !state.customOnly;
+  if (state.customOnly) state.targetsOnly = false;
+  renderAll();
+};
 ['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold'].forEach(id => $(id).onchange = renderAll);
 load();
 setInterval(load, 30 * 60 * 1000); // re-pull data.json every 30 min

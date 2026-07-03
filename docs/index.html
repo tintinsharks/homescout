@@ -446,16 +446,28 @@ function renderDeals() {
   wireExpanders('dealTable');
 }
 
+function vsListCell(h) {
+  if (h.s2l == null) return '—';
+  const d = h.s2l - 100;                       // + = sold over asking, − = under
+  const cls = d > 0 ? 'neg' : d < 0 ? 'pos' : '';
+  const dollars = h.list_price != null ? h.price - h.list_price : null;
+  const tip = h.list_price != null
+    ? `list ${fmtK(h.list_price)} → sold ${fmtK(h.price)} (${dollars >= 0 ? '+' : '−'}${fmtK(Math.abs(dollars))})`
+    : '';
+  return `<span class="${cls}" title="${tip}">${d > 0 ? '+' : ''}${d.toFixed(1)}%</span>`;
+}
+
 function renderSoldTable() {
   const rows = sortRows(DATA.sold.filter(h => passFilters(h, false)), ...[state.sortS[0], state.sortS[1]]).slice(0, 150);
   $('soldCount').textContent = `— ${rows.length} shown (max 150)`;
   const cols = [['sold_date','Sold'],['address','Address'],['pocket','Pocket'],['price','Price'],
-                ['beds','Bd'],['baths','Ba'],['sqft','SqFt'],['ppsf','$/sqft'],['year','Built']];
+                ['s2l','vs list'],['beds','Bd'],['baths','Ba'],['sqft','SqFt'],['ppsf','$/sqft'],['year','Built']];
   let html = th(cols, 'S', state.sortS);
   rows.forEach(h => {
     html += `<tr><td>${h.sold_date}</td>
       <td><a href="${h.url}" target="_blank">${h.address}</a></td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
+      <td>${vsListCell(h)}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>
       <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td><td>${h.year ?? '—'}</td></tr>`;
   });

@@ -70,7 +70,7 @@
 <body>
 <header>
   <h1>🏡 Home Scout</h1>
-  <span class="sub">Peninsula (Woodside Plaza · Selby-Atherwood · Menlo Park) + East Bay (Fremont · Union City) · 2000+ sqft · refreshes every 4 h</span>
+  <span class="sub">Entire Peninsula (Daly City → Palo Alto) + East Bay (Fremont · Union City) · targets: Woodside Plaza · Selby-Atherwood · Menlo Park · refreshes every 4 h</span>
   <span class="refresh" id="updated"></span>
 </header>
 <main>
@@ -128,7 +128,7 @@
   <div class="panel">
     <h2>🌡️ Market temperature <span class="hint">— buyer's ↔ seller's market: 0–100 blend of sale-to-list %, % over asking & days-on-market</span></h2>
     <label style="font-size:13px;color:var(--muted)">Area
-      <select id="mktScope"><option>Targets</option><option>Redwood City</option><option>Menlo Park</option><option>East Bay</option></select></label>
+      <select id="mktScope"><option>Targets</option><option>Redwood City</option><option>Menlo Park</option><option>Peninsula (other)</option><option>East Bay</option></select></label>
     <div id="tempGauge" style="margin:14px 0"></div>
     <div class="chartbox" style="height:260px"><canvas id="tempChart"></canvas></div>
   </div>
@@ -163,6 +163,13 @@ const POCKET_COLORS = {
   'Menlo Park':'#059669','West Menlo (county)':'#c026d3','Atherton':'#7c2d12','Woodside':'#78716c',
   'Fremont':'#be123c','Union City':'#a16207'
 };
+function colorFor(p, alpha) {
+  const hex = POCKET_COLORS[p];
+  if (hex) return alpha ? hex + Math.round(alpha * 255).toString(16).padStart(2, '0') : hex;
+  let h = 0;
+  for (const ch of String(p)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return alpha ? `hsla(${h % 360},55%,42%,${alpha})` : `hsl(${h % 360},55%,42%)`;
+}
 const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel',
   'EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central',
   'CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks',
@@ -498,8 +505,8 @@ function renderCharts() {
       : (state.pockets.size ? [...state.pockets] : DATA.target_pockets);
     series = scope.map(p => ({
       label: p,
-      borderColor: POCKET_COLORS[p] || '#888',
-      backgroundColor: POCKET_COLORS[p] || '#888',
+      borderColor: colorFor(p),
+      backgroundColor: colorFor(p),
       spanGaps: true, tension: 0.25,
       data: months.map(m => median(DATA.sold.filter(h => h.pocket === p && h.sqft >= 2000 && h.sold_date && h.sold_date.startsWith(m)).map(h => h.ppsf)))
     }));
@@ -522,7 +529,7 @@ function renderCharts() {
   const groups = {};
   solds.forEach(h => { (groups[h.pocket] = groups[h.pocket] || []).push(h); });
   const ds = Object.entries(groups).map(([p, hs]) => ({
-    label: p, backgroundColor: (POCKET_COLORS[p] || '#888') + 'bb',
+    label: p, backgroundColor: colorFor(p, 0.73),
     data: hs.map(h => ({ x: h.sqft, y: h.price, addr: h.address, date: h.sold_date }))
   }));
   if (scatterChart) scatterChart.destroy();
@@ -664,7 +671,7 @@ function popup(h, sold) {
 
 function renderMap() {
   if (!MAP) {
-    MAP = L.map('map').setView([37.462, -122.225], 12);
+    MAP = L.map('map', { preferCanvas: true }).setView([37.462, -122.225], 12);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(MAP);
     // city outlines (Menlo Park / Atherton have no neighborhood polygons).
@@ -687,7 +694,7 @@ function renderMap() {
         style: f => {
           const nm = NB_MAP[f.properties.NB_Area] || f.properties.NB_Area;
           const t = DATA.target_pockets.includes(nm);
-          const c = t ? (POCKET_COLORS[nm] || '#0f766e') : '#9aa4b5';
+          const c = t ? colorFor(nm) : '#9aa4b5';
           return { color: c, weight: t ? 2.2 : 1,
                    fillColor: c, fillOpacity: t ? 0.13 : 0.03, dashArray: t ? null : '4 4' };
         },
@@ -696,7 +703,7 @@ function renderMap() {
     });
     // pockets without an official polygon (county islands) — hull computed by the fetcher
     Object.entries(DATA.extra_polys || {}).forEach(([nm, pts]) => {
-      const c = POCKET_COLORS[nm] || '#b45309';
+      const c = colorFor(nm);
       L.polygon(pts.map(([lo, la]) => [la, lo]),
         { color: c, weight: 2.2, fillColor: c, fillOpacity: 0.13 })
         .bindTooltip(nm, { sticky: true }).addTo(MAP);

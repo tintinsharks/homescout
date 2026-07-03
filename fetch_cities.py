@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""HomeScout East Bay module (runs in .venv — needs homeharvest).
+"""HomeScout per-city module (runs in .venv — needs homeharvest).
 
-The Peninsula pipeline (fetch_data.py) uses Redfin, but Fremont/Union City are
-higher-volume Alameda County markets where Redfin's region IDs are unavailable
-and its 350-row cap truncates. So East Bay comes entirely from Realtor.com via
-HomeHarvest — queried per city (no neighbor leakage), no row cap — and merged
-into the existing docs/data.json produced by fetch_data + enrich.
+The core pipeline (fetch_data.py) covers Redwood City / Menlo Park / Atherton
+via Redfin. Every other city — the rest of the Peninsula plus the East Bay —
+comes from Realtor.com via HomeHarvest: queried per city (no neighbor leakage,
+no 350-row cap) and merged into docs/data.json after fetch_data + enrich run.
 
-Adds Fremont and Union City active + pending listings (with AVM / remarks /
-schools enrichment) and 24 months of sold comps (with sale-to-list), then
-gem-scores each East Bay active against East Bay comps.
+Each city becomes its own pocket. Actives arrive pre-enriched (AVM / remarks /
+schools from the same call); solds carry sale-to-list + DOM; actives are then
+gem-scored against the full combined comp pool.
 """
 
 import json
@@ -23,7 +22,20 @@ import fetch_data as fd
 from enrich_data import OPP_KEYWORDS
 
 DATA_FILE = fd.DOCS / "data.json"
-CITIES = [("Fremont, CA", "Fremont"), ("Union City, CA", "Union City")]
+CITIES = [
+    # East Bay
+    ("Fremont, CA", "Fremont"), ("Union City, CA", "Union City"),
+    # Peninsula
+    ("San Carlos, CA", "San Carlos"), ("Belmont, CA", "Belmont"),
+    ("San Mateo, CA", "San Mateo"), ("Foster City, CA", "Foster City"),
+    ("Burlingame, CA", "Burlingame"), ("Hillsborough, CA", "Hillsborough"),
+    ("Millbrae, CA", "Millbrae"), ("San Bruno, CA", "San Bruno"),
+    ("South San Francisco, CA", "South San Francisco"),
+    ("Daly City, CA", "Daly City"), ("Pacifica, CA", "Pacifica"),
+    ("Half Moon Bay, CA", "Half Moon Bay"), ("Woodside, CA", "Woodside"),
+    ("Portola Valley, CA", "Portola Valley"), ("Palo Alto, CA", "Palo Alto"),
+    ("East Palo Alto, CA", "East Palo Alto"),
+]
 SOLD_DAYS = 730
 
 
@@ -146,20 +158,25 @@ def main():
             eb_sold.append(h)
         print(f"{loc} sold: {len(df)} rows")
 
-    # de-dupe actives by mls/address, gem-score against East Bay comps
-    seen = {}
-    for h in eb_active:
-        seen[h["mls"] or (h["address"], h["zip"])] = h
-    eb_active = list(seen.values())
-    for h in eb_active:
-        fd.gem_score(h, eb_sold, today)
+    # merge with global de-dupe (Woodside etc. can arrive from both Redfin
+    # spillover and the per-city pull — Redfin rows were added first and win)
+    def key(h):
+        return h["mls"] or (h["address"].upper(), h["zip"])
 
-    data["active"].extend(eb_active)
-    data["sold"].extend(eb_sold)
-    data["sold"].sort(key=lambda x: x["sold_date"], reverse=True)
+    have_a = {key(h) for h in data["active"]}
+    new_active = [h for h in {key(h): h for h in eb_active}.values() if key(h) not in have_a]
+    have_s = {(key(h), h["sold_date"]) for h in data["sold"]}
+    new_sold = [h for h in eb_sold if (key(h), h["sold_date"]) not in have_s]
+
+    all_sold = data["sold"] + new_sold
+    for h in new_active:
+        fd.gem_score(h, all_sold, today)
+
+    data["active"].extend(new_active)
+    data["sold"] = sorted(all_sold, key=lambda x: x["sold_date"], reverse=True)
     data["regions"] = sorted(set(h["pocket"] for h in data["active"]))
     DATA_FILE.write_text(json.dumps(data, separators=(",", ":")))
-    print(f"merged East Bay: +{len(eb_active)} active, +{len(eb_sold)} sold "
+    print(f"merged cities: +{len(new_active)} active, +{len(new_sold)} sold "
           f"(now {len(data['active'])} active, {len(data['sold'])} sold total)")
 
 

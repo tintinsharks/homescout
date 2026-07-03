@@ -77,6 +77,13 @@ def temperature(s2l, pct_over, dom):
     return round(sum(parts) / len(parts)) if parts else None
 
 
+PENINSULA_OTHER = {"San Carlos", "Belmont", "San Mateo", "Foster City",
+                   "Burlingame", "Hillsborough", "Millbrae", "San Bruno",
+                   "South San Francisco", "Daly City", "Pacifica",
+                   "Half Moon Bay", "Woodside", "Portola Valley",
+                   "Palo Alto", "East Palo Alto"}
+
+
 def scope_of(pocket):
     """Which aggregation buckets a pocket belongs to (a home can be in several)."""
     buckets = []
@@ -86,6 +93,8 @@ def scope_of(pocket):
         buckets.append("East Bay")
     elif pocket in ("Menlo Park", "West Menlo (county)"):
         buckets.append("Menlo Park")
+    elif pocket in PENINSULA_OTHER:
+        buckets.append("Peninsula (other)")
     else:
         buckets.append("Redwood City")  # RWC + its county islands
     return buckets
@@ -127,7 +136,9 @@ def main():
     # ---- Realtor/HomeHarvest: 3y sale-to-list + days-on-market ----
     s2l = defaultdict(lambda: defaultdict(list))       # month->scope->[ratio%]
     over = defaultdict(lambda: defaultdict(list))       # month->scope->[0/1]
-    for loc in ("Redwood City, CA", "Menlo Park, CA", "Fremont, CA", "Union City, CA"):
+    s2l_cities = ["Redwood City, CA", "Menlo Park, CA", "Fremont, CA", "Union City, CA"] + \
+                 sorted(c + ", CA" for c in PENINSULA_OTHER)
+    for loc in s2l_cities:
         try:
             df = scrape_property(location=loc, listing_type="sold",
                                  property_type=["single_family"], past_days=S2L_DAYS)
@@ -157,7 +168,7 @@ def main():
 
     # ---- assemble monthly series + seasonality ----
     all_months = sorted(set(ppsf) | set(s2l))
-    scopes = ["Targets", "Redwood City", "Menlo Park", "East Bay"]
+    scopes = ["Targets", "Redwood City", "Menlo Park", "Peninsula (other)", "East Bay"]
     monthly = {s: [] for s in scopes}
     seas_acc = {s: defaultdict(lambda: defaultdict(list)) for s in scopes}  # scope->cal_month->metric->[vals]
 

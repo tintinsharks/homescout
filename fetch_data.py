@@ -142,12 +142,26 @@ def load_city_limits():
     return [(f["properties"]["NAME"], f["geometry"]) for f in gj["features"]]
 
 
+# cities covered whole-city via the HomeHarvest module (fetch_cities.py) —
+# recognized here by name so market_trends buckets their rows correctly
+CITY_POCKETS = {
+    "FREMONT": "Fremont", "UNION CITY": "Union City",
+    "SAN CARLOS": "San Carlos", "BELMONT": "Belmont", "SAN MATEO": "San Mateo",
+    "FOSTER CITY": "Foster City", "BURLINGAME": "Burlingame",
+    "HILLSBOROUGH": "Hillsborough", "MILLBRAE": "Millbrae",
+    "SAN BRUNO": "San Bruno", "SOUTH SAN FRANCISCO": "South San Francisco",
+    "DALY CITY": "Daly City", "PACIFICA": "Pacifica",
+    "HALF MOON BAY": "Half Moon Bay", "WOODSIDE": "Woodside",
+    "PORTOLA VALLEY": "Portola Valley", "PALO ALTO": "Palo Alto",
+    "EAST PALO ALTO": "East Palo Alto",
+}
+
+
 def classify(lon, lat, zipcode, city, hoods, limits):
     cu = city.upper()
-    if cu == "FREMONT":
-        return "Fremont"
-    if cu == "UNION CITY":
-        return "Union City"
+    if cu in CITY_POCKETS and cu not in ("WOODSIDE",):
+        # Woodside still goes through the polygon path (RWC-border spillover)
+        return CITY_POCKETS[cu]
     if lon is not None and lat is not None:
         for name, geom, (x0, y0, x1, y1) in hoods:
             if x0 <= lon <= x1 and y0 <= lat <= y1 and point_in_geom(lon, lat, geom):

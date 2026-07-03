@@ -70,7 +70,7 @@
 <body>
 <header>
   <h1>🏡 RWC HomeScout</h1>
-  <span class="sub">Woodside Plaza &amp; Selby-Atherwood focus · 2000+ sqft · data refreshes every 4 h</span>
+  <span class="sub">Woodside Plaza · Selby-Atherwood · Menlo Park focus · 2000+ sqft · data refreshes every 4 h</span>
   <span class="refresh" id="updated"></span>
 </header>
 <main>
@@ -528,12 +528,18 @@ function renderMap() {
     MAP = L.map('map').setView([37.462, -122.225], 12);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(MAP);
-    // city outlines for context (Menlo Park / Atherton have no neighborhood polygons)
+    // city outlines (Menlo Park / Atherton have no neighborhood polygons).
+    // A city that's a target pocket gets shaded like one; others stay faint context.
     fetch('city_limits.geojson').then(r => r.json()).then(gj => {
       L.geoJSON(gj, {
         filter: f => f.properties.NAME !== 'REDWOOD CITY',
-        style: f => ({ color: POCKET_COLORS[f.properties.NAME === 'ATHERTON' ? 'Atherton' : 'Menlo Park'],
-                       weight: 1.4, fillOpacity: 0.02, dashArray: '2 5' }),
+        style: f => {
+          const nm = f.properties.NAME === 'ATHERTON' ? 'Atherton' : 'Menlo Park';
+          const t = DATA.target_pockets.includes(nm);
+          const c = POCKET_COLORS[nm];
+          return { color: c, weight: t ? 2.2 : 1.4, fillColor: c,
+                   fillOpacity: t ? 0.10 : 0.02, dashArray: t ? null : '2 5' };
+        },
         onEachFeature: (f, l) => l.bindTooltip(f.properties.NAME === 'ATHERTON' ? 'Atherton' : 'Menlo Park', { sticky: true })
       }).addTo(MAP);
     });

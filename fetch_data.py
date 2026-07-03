@@ -69,7 +69,8 @@ POCKET_NAMES = {
     "BAIR ISLAND": "Bair Island",
     "REDWOOD SHORES": "Redwood Shores",
 }
-TARGET_POCKETS = ["Woodside Plaza", "Selby-Atherwood (county)"]
+TARGET_POCKETS = ["Woodside Plaza", "Selby-Atherwood (county)",
+                  "Menlo Park", "West Menlo (county)"]
 CITY_LIMITS_FILE = ROOT / "city_limits.geojson"
 
 
@@ -419,11 +420,12 @@ def main():
     HISTORY_FILE.write_text(json.dumps(history, indent=1))
 
     # map overlay for pockets that have no official polygon (e.g. county islands)
-    selby_pts = [(h["lon"], h["lat"]) for h in active + sold
-                 if h["pocket"] == "Selby-Atherwood (county)" and h["lon"]]
     extra_polys = {}
-    if len(selby_pts) >= 3:
-        extra_polys["Selby-Atherwood (county)"] = convex_hull(selby_pts)
+    for pocket in ("Selby-Atherwood (county)", "West Menlo (county)"):
+        pts = [(h["lon"], h["lat"]) for h in active + sold
+               if h["pocket"] == pocket and h["lon"]]
+        if len(pts) >= 3:
+            extra_polys[pocket] = convex_hull(pts)
 
     data = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

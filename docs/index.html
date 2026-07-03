@@ -397,7 +397,8 @@ function th(cols, table, sortState) {
 function renderActive(meds) {
   const rows = sortRows(DATA.active.filter(h => passFilters(h, true)), ...[state.sortA[0], state.sortA[1]]);
   $('activeCount').textContent = `— ${rows.length} shown`;
-  const cols = [['address','Address'],['pocket','Pocket'],['price','Price'],['gem_pct','Gem'],['vs_est_pct','AVM Δ'],
+  const cols = [['address','Address'],['pocket','Pocket'],['price','Price'],['expected_price','Comp value'],
+                ['gem_pct','Gem'],['vs_est_pct','AVM Δ'],
                 ['beds','Bd'],['baths','Ba'],['sqft','SqFt'],['ppsf','$/sqft'],['lot','Lot'],
                 ['year','Built'],['dom','DOM'],['info','']];
   let html = th(cols, 'A', state.sortA);
@@ -406,6 +407,7 @@ function renderActive(meds) {
       <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}${flagBadge(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td>
       <td><b>${fmt$(h.price)}</b></td>
+      <td title="${h.n_comps ? h.n_comps + ' comps' : ''}">${h.expected_price ? fmtK(h.expected_price) : '—'}</td>
       <td>${gemCell(h)}</td>
       <td>${avmCell(h)}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>

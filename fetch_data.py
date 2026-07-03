@@ -26,9 +26,29 @@ GEOJSON_FILE = DOCS / "neighborhoods.geojson"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 BASE = "https://www.redfin.com/stingray/api/gis-csv"
-REGION = "region_id=15525&region_type=6"  # Redwood City
 COMMON = "al=1&uipt=1&v=8&sf=1,2,3,5,6,7&status=9&num_homes=350"
 MIN_SQFT = 1800  # small buffer below the 2000 hard filter (UI default is 2000)
+
+ATHERTON_POLY = ("poly=-122.24+37.435,-122.17+37.435,-122.17+37.472,"
+                 "-122.24+37.472,-122.24+37.435")
+# (region query, sold price bands sized to keep each response under the 350-row cap)
+REGIONS = [
+    ("Redwood City", "region_id=15525&region_type=6",
+     ["max_price=1300000", "min_price=1300001&max_price=1600000",
+      "min_price=1600001&max_price=1850000", "min_price=1850001&max_price=2100000",
+      "min_price=2100001&max_price=2400000", "min_price=2400001&max_price=2750000",
+      "min_price=2750001&max_price=3200000", "min_price=3200001&max_price=4000000",
+      "min_price=4000001"]),
+    ("Menlo Park", "region_id=11961&region_type=6",
+     ["max_price=2200000", "min_price=2200001&max_price=2900000",
+      "min_price=2900001&max_price=3800000", "min_price=3800001&max_price=5200000",
+      "min_price=5200001"]),
+    ("Atherton", ATHERTON_POLY,
+     ["max_price=6500000", "min_price=6500001"]),
+]
+# poly/box queries can leak neighbors we don't cover
+EXCLUDE_CITIES = {"PALO ALTO", "EAST PALO ALTO", "STANFORD", "LOS ALTOS",
+                  "SAN CARLOS", "MOUNTAIN VIEW", "SUNNYVALE", "PORTOLA VALLEY"}
 
 POCKET_NAMES = {
     "FARMHILL": "Farm Hills",
@@ -53,8 +73,8 @@ TARGET_POCKETS = ["Woodside Plaza", "Selby-Atherwood (county)"]
 CITY_LIMITS_FILE = ROOT / "city_limits.geojson"
 
 
-def fetch_csv(params: str):
-    url = f"{BASE}?{COMMON}&{REGION}&{params}"
+def fetch_csv(region: str, params: str):
+    url = f"{BASE}?{COMMON}&{region}&{params}"
     for attempt in range(3):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -120,19 +140,27 @@ def load_city_limits():
     return [(f["properties"]["NAME"], f["geometry"]) for f in gj["features"]]
 
 
-def classify(lon, lat, zipcode, hoods, limits):
+def classify(lon, lat, zipcode, city, hoods, limits):
     if lon is not None and lat is not None:
         for name, geom, (x0, y0, x1, y1) in hoods:
             if x0 <= lon <= x1 and y0 <= lat <= y1 and point_in_geom(lon, lat, geom):
                 return name
-        # not in any city neighborhood — check if it's outside city limits entirely
-        in_rwc = any(n == "REDWOOD CITY" and point_in_geom(lon, lat, g) for n, g in limits)
-        if not in_rwc:
-            # unincorporated San Mateo County pockets
+        # not in an RWC neighborhood — which city limits (if any) contain it?
+        in_city = next((n for n, g in limits if point_in_geom(lon, lat, g)), None)
+        if in_city == "ATHERTON":
+            return "Atherton"
+        if in_city == "MENLO PARK":
+            return "Menlo Park"
+        if in_city is None:
+            # unincorporated San Mateo County pockets (or towns we don't map)
+            if city.upper() == "WOODSIDE":
+                return "Woodside"
             if zipcode in ("94061", "94027") and lon > -122.245:
                 return "Selby-Atherwood (county)"
             if zipcode == "94062":
                 return "Emerald Hills (county)"
+            if zipcode == "94025":
+                return "West Menlo (county)"
             return "Other county"
     if zipcode == "94062":
         return "Emerald Hills (county)"
@@ -140,6 +168,10 @@ def classify(lon, lat, zipcode, hoods, limits):
         return "Redwood Shores"
     if zipcode == "94063":
         return "East RWC"
+    if zipcode in ("94025", "94026"):
+        return "Menlo Park"
+    if zipcode == "94027":
+        return "Atherton"
     return "Other RWC"
 
 
@@ -169,10 +201,13 @@ def norm_row(r: dict, hoods, limits):
     sqft = to_int(r.get("SQUARE FEET"))
     if not price or not sqft:
         return None
+    city = (r.get("CITY") or "").strip()
+    if city.upper() in EXCLUDE_CITIES:
+        return None
     lat = to_float(r.get("LATITUDE"))
     lon = to_float(r.get("LONGITUDE"))
     zipcode = (r.get("ZIP OR POSTAL CODE") or "").strip()[:5]
-    pocket = classify(lon, lat, zipcode, hoods, limits)
+    pocket = classify(lon, lat, zipcode, city, hoods, limits)
     url_key = next((k for k in r if k.startswith("URL")), None)
     return {
         "mls": (r.get("MLS#") or "").strip(),
@@ -323,23 +358,23 @@ def main():
     limits = load_city_limits()
     today = datetime.now(timezone.utc).date()
 
-    print(f"[{datetime.now(timezone.utc).isoformat()}] fetching active listings...")
-    active_rows = fetch_csv(f"min_sqft={MIN_SQFT}")
-    print(f"  {len(active_rows)} active rows")
-
-    print("fetching sold (730d), split by price band to dodge the 350-row cap...")
-    sold_rows = []
-    for band in ("max_price=1300000", "min_price=1300001&max_price=1600000",
-                 "min_price=1600001&max_price=1850000", "min_price=1850001&max_price=2100000",
-                 "min_price=2100001&max_price=2400000", "min_price=2400001&max_price=2750000",
-                 "min_price=2750001&max_price=3200000", "min_price=3200001&max_price=4000000",
-                 "min_price=4000001"):
-        rows = fetch_csv(f"sold_within_days=730&{band}")
-        print(f"  {band}: {len(rows)} rows")
+    active_rows, sold_rows = [], []
+    for name, region, bands in REGIONS:
+        print(f"[{datetime.now(timezone.utc).isoformat()}] {name}: fetching active listings...")
+        rows = fetch_csv(region, f"min_sqft={MIN_SQFT}")
+        print(f"  {len(rows)} active rows")
         if len(rows) >= 350:
-            print(f"  WARNING: {band} hit the 350-row cap; results may be truncated", file=sys.stderr)
-        sold_rows.extend(rows)
-        time.sleep(3)
+            print(f"  WARNING: {name} actives hit the 350-row cap", file=sys.stderr)
+        active_rows.extend(rows)
+        time.sleep(2)
+        print(f"{name}: fetching sold (730d) by price band...")
+        for band in bands:
+            rows = fetch_csv(region, f"sold_within_days=730&{band}")
+            print(f"  {band}: {len(rows)} rows")
+            if len(rows) >= 350:
+                print(f"  WARNING: {name} {band} hit the 350-row cap; results may be truncated", file=sys.stderr)
+            sold_rows.extend(rows)
+            time.sleep(3)
 
     active = dedupe([x for x in (norm_row(r, hoods, limits) for r in active_rows) if x and not x["sold_date"]])
     sold = dedupe([x for x in (norm_row(r, hoods, limits) for r in sold_rows) if x and x["sold_date"]])

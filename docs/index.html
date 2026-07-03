@@ -143,7 +143,8 @@ const POCKET_COLORS = {
   'Woodside Plaza':'#2563eb','Selby-Atherwood (county)':'#b45309','Farm Hills':'#0f766e',
   'Emerald Hills (county)':'#7c3aed','Mount Carmel':'#db2777','Canyon':'#ca8a04',
   'Eagle Hill':'#0891b2','Edgewood Park':'#4f46e5','Redwood Oaks':'#65a30d',
-  'Roosevelt':'#e11d48','Redwood Shores':'#64748b'
+  'Roosevelt':'#e11d48','Redwood Shores':'#64748b',
+  'Menlo Park':'#059669','West Menlo (county)':'#c026d3','Atherton':'#7c2d12','Woodside':'#78716c'
 };
 const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel',
   'EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central',
@@ -524,9 +525,18 @@ function popup(h, sold) {
 
 function renderMap() {
   if (!MAP) {
-    MAP = L.map('map').setView([37.468, -122.24], 13);
+    MAP = L.map('map').setView([37.462, -122.225], 12);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       { attribution: '© OpenStreetMap © CARTO', maxZoom: 19 }).addTo(MAP);
+    // city outlines for context (Menlo Park / Atherton have no neighborhood polygons)
+    fetch('city_limits.geojson').then(r => r.json()).then(gj => {
+      L.geoJSON(gj, {
+        filter: f => f.properties.NAME !== 'REDWOOD CITY',
+        style: f => ({ color: POCKET_COLORS[f.properties.NAME === 'ATHERTON' ? 'Atherton' : 'Menlo Park'],
+                       weight: 1.4, fillOpacity: 0.02, dashArray: '2 5' }),
+        onEachFeature: (f, l) => l.bindTooltip(f.properties.NAME === 'ATHERTON' ? 'Atherton' : 'Menlo Park', { sticky: true })
+      }).addTo(MAP);
+    });
     fetch('neighborhoods.geojson').then(r => r.json()).then(gj => {
       hoodLayer = L.geoJSON(gj, {
         style: f => {

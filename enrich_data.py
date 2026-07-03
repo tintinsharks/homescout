@@ -46,14 +46,15 @@ def main():
     data = json.loads(DATA_FILE.read_text())
 
     frames = []
-    for lt in ("for_sale", "pending"):
-        try:
-            df = scrape_property(location="Redwood City, CA",
-                                 listing_type=lt, property_type=["single_family"])
-            frames.append(df)
-            print(f"realtor.com {lt}: {len(df)} rows")
-        except Exception as e:
-            print(f"scrape {lt} failed: {e}", file=sys.stderr)
+    for loc in ("Redwood City, CA", "Menlo Park, CA", "Atherton, CA"):
+        for lt in ("for_sale", "pending"):
+            try:
+                df = scrape_property(location=loc,
+                                     listing_type=lt, property_type=["single_family"])
+                frames.append(df)
+                print(f"realtor.com {loc} {lt}: {len(df)} rows")
+            except Exception as e:
+                print(f"scrape {loc} {lt} failed: {e}", file=sys.stderr)
     if not frames:
         sys.exit(1)
     df = pd.concat(frames, ignore_index=True)
@@ -96,14 +97,15 @@ def main():
 
     # sale-to-list enrichment for sold comps (Realtor keeps original list price)
     try:
-        sdf = scrape_property(location="Redwood City, CA", listing_type="sold",
-                              property_type=["single_family"], past_days=365)
-        print(f"realtor.com sold: {len(sdf)} rows")
         skey = {}
-        for _, r in sdf.iterrows():
-            k = norm_addr(r.get("full_street_line")) + " " + str(r.get("zip_code") or "")[:5]
-            skey[k] = r
         n = 0
+        for loc in ("Redwood City, CA", "Menlo Park, CA", "Atherton, CA"):
+            sdf = scrape_property(location=loc, listing_type="sold",
+                                  property_type=["single_family"], past_days=365)
+            print(f"realtor.com {loc} sold: {len(sdf)} rows")
+            for _, r in sdf.iterrows():
+                k = norm_addr(r.get("full_street_line")) + " " + str(r.get("zip_code") or "")[:5]
+                skey[k] = r
         for h in data["sold"]:
             r = skey.get(norm_addr(h["address"]) + " " + h["zip"])
             if r is None:

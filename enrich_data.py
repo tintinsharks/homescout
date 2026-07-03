@@ -94,6 +94,32 @@ def main():
         elif isinstance(schools, list):
             h["schools"] = ", ".join(map(str, schools[:4]))
 
+    # sale-to-list enrichment for sold comps (Realtor keeps original list price)
+    try:
+        sdf = scrape_property(location="Redwood City, CA", listing_type="sold",
+                              property_type=["single_family"], past_days=365)
+        print(f"realtor.com sold: {len(sdf)} rows")
+        skey = {}
+        for _, r in sdf.iterrows():
+            k = norm_addr(r.get("full_street_line")) + " " + str(r.get("zip_code") or "")[:5]
+            skey[k] = r
+        n = 0
+        for h in data["sold"]:
+            r = skey.get(norm_addr(h["address"]) + " " + h["zip"])
+            if r is None:
+                continue
+            lp, sp = to_i(r.get("list_price")), to_i(r.get("sold_price"))
+            if lp and sp:
+                h["list_price"] = lp
+                h["s2l"] = round(sp / lp * 100, 1)
+                n += 1
+            ld = r.get("list_date")
+            if ld is not None and not pd.isna(ld):
+                h["list_date"] = str(ld)[:10]
+        print(f"sale-to-list attached to {n} sold rows")
+    except Exception as e:
+        print(f"sold enrich failed: {e}", file=sys.stderr)
+
     DATA_FILE.write_text(json.dumps(data, separators=(",", ":")))
     n_est = sum(1 for h in data["active"] if h.get("est_value"))
     n_flag = sum(1 for h in data["active"] if h.get("opp_flags"))

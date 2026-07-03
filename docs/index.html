@@ -101,6 +101,16 @@
   </div>
 
   <div class="panel">
+    <h2>💰 Bidding intel <span class="hint">— what winners actually paid vs asking, in the current filter scope (last 12 mo)</span></h2>
+    <div class="cards" id="bidCards"></div>
+  </div>
+
+  <div class="panel">
+    <h2>📅 Open houses <span class="hint">— upcoming, in the current filter scope, best gems first</span></h2>
+    <div class="twrap"><table id="ohTable"></table></div>
+  </div>
+
+  <div class="panel">
     <h2>Active listings <span class="hint" id="activeCount"></span></h2>
     <div class="twrap"><table id="activeTable"></table></div>
   </div>
@@ -296,6 +306,54 @@ function renderKPIs(meds) {
     <div class="card"><div class="v">${mp ? fmtK(mp) : '—'}</div><div class="l">median sold · 12 mo</div></div>
     <div class="card"><div class="v">${mppsf ? '$' + Math.round(mppsf) : '—'}</div><div class="l">median sold $/sqft</div></div>
     <div class="card"><div class="v" style="color:${yoy == null ? 'inherit' : yoy <= 0 ? 'var(--new)' : 'var(--bad)'}">${yoy == null ? '—' : (yoy > 0 ? '+' : '') + yoy.toFixed(1) + '%'}</div><div class="l">$/sqft vs prior year</div></div>`;
+}
+
+function renderBid() {
+  const cutoff = monthsAgoISO(12);
+  const rows = DATA.sold.filter(h => passFilters(h, false) && h.s2l && h.sold_date >= cutoff);
+  if (rows.length < 5) {
+    $('bidCards').innerHTML = '<div class="card"><div class="l">Not enough sales with list-price data in this scope — widen the filters.</div></div>';
+    return;
+  }
+  const s2l = median(rows.map(h => h.s2l));
+  const over = rows.filter(h => h.s2l > 100).length / rows.length * 100;
+  const overpay = median(rows.map(h => h.price - h.list_price));
+  const days = rows.filter(h => h.list_date)
+    .map(h => (new Date(h.sold_date) - new Date(h.list_date)) / 86400000).filter(d => d >= 0 && d < 400);
+  $('bidCards').innerHTML = `
+    <div class="card"><div class="v">${s2l.toFixed(1)}%</div><div class="l">median sale-to-list</div></div>
+    <div class="card"><div class="v">${Math.round(over)}%</div><div class="l">sold over asking</div></div>
+    <div class="card"><div class="v" style="color:${overpay >= 0 ? 'var(--bad)' : 'var(--new)'}">${overpay >= 0 ? '+' : '−'}${fmtK(Math.abs(overpay))}</div><div class="l">median vs asking</div></div>
+    <div class="card"><div class="v">${days.length ? Math.round(median(days)) : '—'}</div><div class="l">median days list → close</div></div>
+    <div class="card"><div class="v">${rows.length}</div><div class="l">sales measured</div></div>`;
+}
+
+function parseOH(s) {
+  const m = String(s).match(/^([A-Za-z]+)-(\d+)-(\d+)/);
+  if (!m) return null;
+  const d = new Date(`${m[1]} ${m[2]}, ${m[3]}`);
+  return isNaN(d) ? null : d;
+}
+
+function renderOH() {
+  const now = new Date(DATA.generated_at);
+  now.setHours(0, 0, 0, 0);
+  const rows = DATA.active.filter(h => passFilters(h, true) && h.open_house)
+    .map(h => ({ h, d: parseOH(h.open_house) }))
+    .filter(x => x.d && x.d >= now)
+    .sort((a, b) => (a.d - b.d) || ((b.h.gem_pct ?? -99) - (a.h.gem_pct ?? -99)));
+  if (!rows.length) {
+    $('ohTable').innerHTML = '<tr><td class="empty">No upcoming open houses in the current scope.</td></tr>';
+    return;
+  }
+  let html = '<tr><th>When</th><th>Address</th><th>Pocket</th><th>Price</th><th>Gem</th><th>AVM Δ</th><th>SqFt</th></tr>';
+  rows.forEach(({ h }) => {
+    html += `<tr><td><b>${h.open_house.replace(/-2\d{3}/, '').replace(/-/g, ' ')}</b></td>
+      <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}${flagBadge(h)}</td>
+      <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
+      <td>${gemCell(h)}</td><td>${avmCell(h)}</td><td>${h.sqft.toLocaleString()}</td></tr>`;
+  });
+  $('ohTable').innerHTML = html;
 }
 
 /* ---------- tables ---------- */
@@ -551,6 +609,8 @@ function renderAll() {
   renderPocketChips();
   renderKPIs(meds);
   renderDeals();
+  renderBid();
+  renderOH();
   renderActive(meds);
   renderSoldTable();
   renderCharts();

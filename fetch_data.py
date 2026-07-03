@@ -275,12 +275,14 @@ def send_alerts(active, prev_active):
     prev = {h["mls"]: h for h in prev_active}
     lines = []
     for h in active:
-        if not h["target"] or h["sqft"] < 2000:
+        high_gem = (h.get("gem_pct") or 0) >= 10 and h["price"] <= 3300000
+        if (not h["target"] and not high_gem) or h["sqft"] < 2000:
             continue
         old = prev.get(h["mls"])
         gem = f" · gem {h['gem_pct']:+.0f}%" if h.get("gem_pct") is not None else ""
         if old is None:
-            lines.append(f"🆕 **{h['address']}** ({h['pocket']}) — ${h['price']:,} · "
+            icon = "🆕" if h["target"] else "💎"
+            lines.append(f"{icon} **{h['address']}** ({h['pocket']}) — ${h['price']:,} · "
                          f"{h['sqft']:,} sqft · ${h['ppsf']}/sqft{gem}\n{h['url']}")
         elif h["price"] < old["price"]:
             lines.append(f"✂️ **{h['address']}** cut ${old['price'] - h['price']:,} → ${h['price']:,}{gem}\n{h['url']}")

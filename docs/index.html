@@ -49,6 +49,9 @@
        color:#fff; margin-left:5px; vertical-align:1px; }
   .b.new { background:var(--new); } .b.cut { background:var(--cut); }
   .b.pend { background:var(--pend); } .b.oh { background:var(--accent2); }
+  .b.stale { background:#6b7280; }
+  tr.comps td { background:#f8fafc; white-space:normal; font-size:12.5px; color:var(--muted); }
+  .expand { cursor:pointer; }
   .pos { color:var(--new); font-weight:600; } .neg { color:var(--bad); font-weight:600; }
   .pocket-tag { display:inline-block; padding:1px 8px; border-radius:9px; font-size:11.5px;
                 background:#eef1f5; color:var(--muted); }
@@ -90,7 +93,7 @@
   </div>
 
   <div class="panel">
-    <h2>🔥 Deal radar <span class="hint">— active homes priced below their pocket's 12-month median $/sqft</span></h2>
+    <h2>🔥 Deal radar <span class="hint">— priced below comp-based value (10 nearest sold comps, weighted by distance, size & recency)</span></h2>
     <div class="twrap"><table id="dealTable"></table></div>
   </div>
 
@@ -100,7 +103,7 @@
   </div>
 
   <div class="panel">
-    <h2>Sold trends (last 12 months)</h2>
+    <h2>Sold trends (last 24 months)</h2>
     <div class="charts">
       <div class="chartbox"><canvas id="trendChart"></canvas></div>
       <div class="chartbox"><canvas id="scatterChart"></canvas></div>
@@ -140,11 +143,19 @@ let state = { targetsOnly:true, pockets:new Set(), sortA:['dom',1], sortS:['sold
 const median = a => { if (!a.length) return null; const s=[...a].sort((x,y)=>x-y);
   const m = Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; };
 
+function monthsAgoISO(n) {
+  const d = new Date(DATA.generated_at);
+  d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 function pocketMedians() {
-  // 12-mo median $/sqft per pocket for 2000+ sqft solds (min 5 comps, else all-size, else null)
+  // trailing-12-month median $/sqft per pocket for 2000+ sqft solds (min 5 comps, else all-size)
+  const cutoff = monthsAgoISO(12);
   const out = {};
   const byPocket = {};
-  DATA.sold.forEach(h => { (byPocket[h.pocket] = byPocket[h.pocket] || []).push(h); });
+  DATA.sold.filter(h => h.sold_date >= cutoff)
+    .forEach(h => { (byPocket[h.pocket] = byPocket[h.pocket] || []).push(h); });
   for (const [p, hs] of Object.entries(byPocket)) {
     let comps = hs.filter(h => h.sqft >= 2000);
     if (comps.length < 5) comps = hs;
@@ -176,8 +187,15 @@ function badges(h) {
   const cut = priceCut(h);
   if (cut) s += `<span class="b cut">CUT −${fmtK(cut)}</span>`;
   if (/pending|contingent/i.test(h.status)) s += '<span class="b pend">PENDING</span>';
+  else if (h.dom != null && h.dom >= 21) s += '<span class="b stale">STALE</span>';
   if (h.open_house) s += '<span class="b oh">OPEN</span>';
   return s;
+}
+
+function gemCell(h) {
+  if (h.gem_pct == null) return '—';
+  const cls = h.gem_pct >= 5 ? 'pos' : h.gem_pct <= -5 ? 'neg' : '';
+  return `<span class="${cls}" title="expected ${fmtK(h.expected_price)} from ${h.n_comps} comps">${h.gem_pct > 0 ? '+' : ''}${Math.round(h.gem_pct)}%</span>`;
 }
 
 function vsMedian(h, meds) {
@@ -196,15 +214,20 @@ function renderKPIs(meds) {
   const newCount = act.filter(isNew).length;
   const cutCount = act.filter(h => priceCut(h) > 0).length;
   const scope = state.targetsOnly ? DATA.target_pockets : [...state.pockets];
-  const soldScope = DATA.sold.filter(h => (scope.length ? scope.includes(h.pocket) : true) && h.sqft >= 2000);
-  const mp = median(soldScope.map(h => h.price)), mppsf = median(soldScope.map(h => h.ppsf));
+  const inScope = h => (scope.length ? scope.includes(h.pocket) : true) && h.sqft >= 2000;
+  const cut12 = monthsAgoISO(12);
+  const last12 = DATA.sold.filter(h => inScope(h) && h.sold_date >= cut12);
+  const prior12 = DATA.sold.filter(h => inScope(h) && h.sold_date < cut12);
+  const mp = median(last12.map(h => h.price)), mppsf = median(last12.map(h => h.ppsf));
+  const mppsfPrior = median(prior12.map(h => h.ppsf));
+  const yoy = (mppsf && mppsfPrior) ? (mppsf - mppsfPrior) / mppsfPrior * 100 : null;
   $('kpis').innerHTML = `
     <div class="card"><div class="v">${act.length}</div><div class="l">active matches</div></div>
     <div class="card"><div class="v" style="color:var(--new)">${newCount}</div><div class="l">new (≤4 days)</div></div>
     <div class="card"><div class="v" style="color:var(--cut)">${cutCount}</div><div class="l">price cuts</div></div>
     <div class="card"><div class="v">${mp ? fmtK(mp) : '—'}</div><div class="l">median sold · 12 mo</div></div>
     <div class="card"><div class="v">${mppsf ? '$' + Math.round(mppsf) : '—'}</div><div class="l">median sold $/sqft</div></div>
-    <div class="card"><div class="v">${soldScope.length}</div><div class="l">sold comps (2000+ sqft)</div></div>`;
+    <div class="card"><div class="v" style="color:${yoy == null ? 'inherit' : yoy <= 0 ? 'var(--new)' : 'var(--bad)'}">${yoy == null ? '—' : (yoy > 0 ? '+' : '') + yoy.toFixed(1) + '%'}</div><div class="l">$/sqft vs prior year</div></div>`;
 }
 
 /* ---------- tables ---------- */
@@ -224,18 +247,18 @@ function th(cols, table, sortState) {
 function renderActive(meds) {
   const rows = sortRows(DATA.active.filter(h => passFilters(h, true)), ...[state.sortA[0], state.sortA[1]]);
   $('activeCount').textContent = `— ${rows.length} shown`;
-  const cols = [['address','Address'],['pocket','Pocket'],['price','Price'],['beds','Bd'],['baths','Ba'],
-                ['sqft','SqFt'],['ppsf','$/sqft'],['vs','vs pocket'],['year','Built'],['dom','DOM'],['open_house','Open house']];
+  const cols = [['address','Address'],['pocket','Pocket'],['price','Price'],['gem_pct','Gem'],['beds','Bd'],['baths','Ba'],
+                ['sqft','SqFt'],['ppsf','$/sqft'],['lot','Lot'],['year','Built'],['dom','DOM'],['open_house','Open house']];
   let html = th(cols, 'A', state.sortA);
   rows.forEach(h => {
-    const d = vsMedian(h, meds);
     html += `<tr>
       <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td>
       <td><b>${fmt$(h.price)}</b></td>
+      <td>${gemCell(h)}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>
       <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td>
-      <td>${d == null ? '—' : `<span class="${d <= 0 ? 'pos' : 'neg'}">${d > 0 ? '+' : ''}${Math.round(d * 100)}%</span>`}</td>
+      <td>${h.lot ? h.lot.toLocaleString() : '—'}</td>
       <td>${h.year ?? '—'}</td><td>${h.dom ?? '—'}</td>
       <td>${h.open_house ? h.open_house.replace(/-2026.*/, '').replace('-', ' ') : ''}</td></tr>`;
   });
@@ -243,23 +266,34 @@ function renderActive(meds) {
   if (!rows.length) $('activeTable').innerHTML = '<tr><td class="empty">No active listings match the filters.</td></tr>';
 }
 
-function renderDeals(meds) {
-  const rows = DATA.active.filter(h => passFilters(h, true))
-    .map(h => ({ h, d: vsMedian(h, meds) }))
-    .filter(x => x.d != null && x.d < -0.02)
-    .sort((a, b) => a.d - b.d).slice(0, 10);
+function renderDeals() {
+  const rows = DATA.active.filter(h => passFilters(h, true) && h.gem_pct != null && h.gem_pct >= 3)
+    .sort((a, b) => b.gem_pct - a.gem_pct).slice(0, 12);
   if (!rows.length) {
-    $('dealTable').innerHTML = '<tr><td class="empty">Nothing under pocket median right now — check back after the next refresh.</td></tr>';
+    $('dealTable').innerHTML = '<tr><td class="empty">No listings priced meaningfully below their comp-based value right now — check back after the next refresh.</td></tr>';
     return;
   }
-  let html = '<tr><th>Address</th><th>Pocket</th><th>Price</th><th>$/sqft</th><th>Pocket median</th><th>Discount</th><th>SqFt</th><th>DOM</th></tr>';
-  rows.forEach(({ h, d }) => {
+  let html = '<tr><th>Address</th><th>Pocket</th><th>Price</th><th>Comp value</th><th>Gem</th><th>SqFt</th><th>$/sqft</th><th>DOM</th><th></th></tr>';
+  rows.forEach((h, i) => {
     html += `<tr><td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
-      <td>$${h.ppsf.toLocaleString()}</td><td>$${Math.round(meds[h.pocket].ppsf).toLocaleString()}</td>
-      <td class="pos">${Math.round(d * 100)}%</td><td>${h.sqft.toLocaleString()}</td><td>${h.dom ?? '—'}</td></tr>`;
+      <td>${fmtK(h.expected_price)}</td>
+      <td class="pos"><b>+${Math.round(h.gem_pct)}%</b></td>
+      <td>${h.sqft.toLocaleString()}</td><td>$${h.ppsf.toLocaleString()}</td><td>${h.dom ?? '—'}</td>
+      <td class="expand" data-i="${i}">▸ comps</td></tr>
+      <tr class="comps" id="comps-${i}" style="display:none"><td colspan="9">${
+        (h.comps || []).map(c =>
+          `<a href="${c.url}" target="_blank">${c.address}</a> (${c.pocket}) — sold ${c.sold_date} · ${fmtK(c.price)} · ${c.sqft.toLocaleString()} sqft · $${c.ppsf}/sqft · ${c.dist_m}m away`
+        ).join('<br>') || 'comp details unavailable'
+      }</td></tr>`;
   });
   $('dealTable').innerHTML = html;
+  document.querySelectorAll('#dealTable .expand').forEach(el => el.onclick = () => {
+    const row = $('comps-' + el.dataset.i);
+    const open = row.style.display !== 'none';
+    row.style.display = open ? 'none' : '';
+    el.textContent = open ? '▸ comps' : '▾ comps';
+  });
 }
 
 function renderSoldTable() {
@@ -283,7 +317,7 @@ let trendChart = null, scatterChart = null;
 function renderCharts() {
   const months = [];
   const now = new Date(DATA.generated_at);
-  for (let i = 11; i >= 0; i--) {
+  for (let i = 23; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     months.push(d.toISOString().slice(0, 7));
   }
@@ -347,9 +381,11 @@ function renderCharts() {
 
 /* ---------- map ---------- */
 function popup(h, sold) {
+  const gem = (!sold && h.gem_pct != null)
+    ? `<br>Comp value ${fmtK(h.expected_price)} → <b class="${h.gem_pct >= 5 ? 'pos' : ''}">${h.gem_pct > 0 ? '+' : ''}${Math.round(h.gem_pct)}% gem</b>` : '';
   return `<b>${h.address}</b><br>${pocketTag(h.pocket, h.target)}<br>
     ${fmt$(h.price)} · ${h.beds ?? '?'}bd/${h.baths ?? '?'}ba · ${h.sqft.toLocaleString()} sqft · $${h.ppsf}/sqft
-    ${sold ? `<br>Sold ${h.sold_date}` : `<br>${h.status}${h.dom != null ? ' · ' + h.dom + ' DOM' : ''}`}
+    ${sold ? `<br>Sold ${h.sold_date}` : `<br>${h.status}${h.dom != null ? ' · ' + h.dom + ' DOM' : ''}`}${gem}
     <br><a href="${h.url}" target="_blank">View on Redfin →</a>`;
 }
 
@@ -382,7 +418,7 @@ function renderMap() {
   if (layerSold) layerSold.remove();
   layerSold = L.layerGroup();
   if ($('mSold').checked) {
-    DATA.sold.filter(h => passFilters(h, false) && h.lat).forEach(h => {
+    DATA.sold.filter(h => passFilters(h, false) && h.lat && h.sold_date >= monthsAgoISO(12)).forEach(h => {
       const c = h.ppsf <= 950 ? '#16a34a' : h.ppsf <= 1200 ? '#d97706' : '#dc2626';
       L.circleMarker([h.lat, h.lon], { radius: 4, color: c, fillColor: c, fillOpacity: 0.55, weight: 1 })
         .bindPopup(popup(h, true)).addTo(layerSold);
@@ -415,7 +451,7 @@ function renderAll() {
   $('chipTargets').classList.toggle('on', state.targetsOnly);
   renderPocketChips();
   renderKPIs(meds);
-  renderDeals(meds);
+  renderDeals();
   renderActive(meds);
   renderSoldTable();
   renderCharts();

@@ -206,6 +206,95 @@ def dedupe(rows):
     return list(seen.values())
 
 
+def haversine_m(lat1, lon1, lat2, lon2):
+    import math
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def gem_score(home, sold, today):
+    """Comp-based expected price for an active listing.
+
+    Comps: sold ≤15 months ago, sqft within 0.75x–1.35x, same pocket or ≤1.2 km.
+    Each comp weighted by recency, size closeness, distance, same-pocket bonus;
+    expected $/sqft = weighted mean of the top-10 comps.
+    """
+    if not home["lat"]:
+        return
+    cutoff = (today - timedelta(days=456)).isoformat()
+    cands = []
+    for s in sold:
+        if not s["sold_date"] or s["sold_date"] < cutoff or not s["lat"]:
+            continue
+        if not (0.75 * home["sqft"] <= s["sqft"] <= 1.35 * home["sqft"]):
+            continue
+        dist = haversine_m(home["lat"], home["lon"], s["lat"], s["lon"])
+        same = s["pocket"] == home["pocket"]
+        if not same and dist > 1200:
+            continue
+        months = max(0.0, (today - datetime.strptime(s["sold_date"], "%Y-%m-%d").date()).days / 30.4)
+        w = (1.0 / (1 + months / 6)) \
+            * (1.0 / (1 + abs(s["sqft"] - home["sqft"]) / (0.25 * home["sqft"]))) \
+            * (1.0 / (1 + dist / 800)) \
+            * (1.6 if same else 1.0)
+        cands.append((w, dist, s))
+    cands.sort(key=lambda x: -x[0])
+    top = cands[:10]
+    if len(top) < 4:
+        return
+    wsum = sum(w for w, _, _ in top)
+    exp_ppsf = sum(w * s["ppsf"] for w, _, s in top) / wsum
+    expected = int(exp_ppsf * home["sqft"])
+    home["expected_price"] = expected
+    home["gem_pct"] = round((expected - home["price"]) / expected * 100, 1)
+    home["n_comps"] = len(top)
+    home["comps"] = [{
+        "address": s["address"], "sold_date": s["sold_date"], "price": s["price"],
+        "sqft": s["sqft"], "ppsf": s["ppsf"], "dist_m": int(d), "pocket": s["pocket"],
+        "url": s["url"],
+    } for _, d, s in top[:5]]
+
+
+def send_alerts(active, prev_active):
+    """POST new-listing / price-cut alerts for target pockets to a Discord webhook.
+
+    Enable by creating ~/.homescout_alerts.json: {"discord_webhook_url": "https://..."}
+    """
+    cfg_path = Path.home() / ".homescout_alerts.json"
+    if not cfg_path.exists():
+        return
+    try:
+        url = json.loads(cfg_path.read_text()).get("discord_webhook_url")
+    except Exception:
+        return
+    if not url:
+        return
+    prev = {h["mls"]: h for h in prev_active}
+    lines = []
+    for h in active:
+        if not h["target"] or h["sqft"] < 2000:
+            continue
+        old = prev.get(h["mls"])
+        gem = f" · gem {h['gem_pct']:+.0f}%" if h.get("gem_pct") is not None else ""
+        if old is None:
+            lines.append(f"🆕 **{h['address']}** ({h['pocket']}) — ${h['price']:,} · "
+                         f"{h['sqft']:,} sqft · ${h['ppsf']}/sqft{gem}\n{h['url']}")
+        elif h["price"] < old["price"]:
+            lines.append(f"✂️ **{h['address']}** cut ${old['price'] - h['price']:,} → ${h['price']:,}{gem}\n{h['url']}")
+    if not lines:
+        return
+    body = json.dumps({"content": "🏡 **HomeScout**\n" + "\n\n".join(lines[:8])}).encode()
+    try:
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=20)
+        print(f"sent {len(lines)} alert(s) to Discord")
+    except Exception as e:
+        print(f"alert send failed: {e}", file=sys.stderr)
+
+
 def convex_hull(points):
     """Andrew's monotone chain; points = [(lon, lat)]. For the map overlay."""
     pts = sorted(set(points))
@@ -236,11 +325,14 @@ def main():
     active_rows = fetch_csv(f"min_sqft={MIN_SQFT}")
     print(f"  {len(active_rows)} active rows")
 
-    print("fetching sold (365d), split by price band to dodge the 350-row cap...")
+    print("fetching sold (730d), split by price band to dodge the 350-row cap...")
     sold_rows = []
-    for band in ("max_price=2000000", "min_price=2000001&max_price=2500000",
-                 "min_price=2500001&max_price=3200000", "min_price=3200001"):
-        rows = fetch_csv(f"min_sqft={MIN_SQFT}&sold_within_days=365&{band}")
+    for band in ("max_price=1300000", "min_price=1300001&max_price=1600000",
+                 "min_price=1600001&max_price=1850000", "min_price=1850001&max_price=2100000",
+                 "min_price=2100001&max_price=2400000", "min_price=2400001&max_price=2750000",
+                 "min_price=2750001&max_price=3200000", "min_price=3200001&max_price=4000000",
+                 "min_price=4000001"):
+        rows = fetch_csv(f"sold_within_days=730&{band}")
         print(f"  {band}: {len(rows)} rows")
         if len(rows) >= 350:
             print(f"  WARNING: {band} hit the 350-row cap; results may be truncated", file=sys.stderr)
@@ -251,6 +343,18 @@ def main():
     sold = dedupe([x for x in (norm_row(r, hoods, limits) for r in sold_rows) if x and x["sold_date"]])
     sold.sort(key=lambda x: x["sold_date"], reverse=True)
     active.sort(key=lambda x: (x["dom"] if x["dom"] is not None else 999))
+
+    for home in active:
+        gem_score(home, sold, today)
+
+    # previous snapshot for alert diffing (before we overwrite data.json)
+    prev_active = []
+    prev_path = DOCS / "data.json"
+    if prev_path.exists():
+        try:
+            prev_active = json.loads(prev_path.read_text()).get("active", [])
+        except Exception:
+            pass
 
     # --- price history tracking between runs ---
     history = {}
@@ -294,6 +398,7 @@ def main():
         "sold": sold,
     }
     (DOCS / "data.json").write_text(json.dumps(data, separators=(",", ":")))
+    send_alerts(active, prev_active)
     n_new = sum(1 for h in active if h.get("dom") is not None and h["dom"] <= 4)
     print(f"wrote docs/data.json: {len(active)} active ({n_new} new), {len(sold)} sold, "
           f"{sum(1 for h in active if h['target'])} active in target pockets")

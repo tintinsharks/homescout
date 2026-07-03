@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """HomeScout market-temperature + seasonality builder.
 
-Runs in .venv (needs homeharvest) but reuses fetch_data's stdlib helpers for
-the Redfin pull + neighborhood classification. Produces docs/market.json:
+Runs in .venv (needs homeharvest); reuses fetch_data's classification helpers.
+A single 10-year Realtor sold pass over every covered city produces
+docs/market.json:
 
-  - 5 years of monthly sold volume, median $/sqft, median days-on-market
-    (Redfin) for three scopes: Targets, Redwood City, Menlo Park.
-  - 3 years of monthly sale-to-list % and % over-asking (Realtor via
-    HomeHarvest) for the same scopes.
-  - A composite 0-100 "market temperature" (0 = deep buyer's market,
+  - monthly sold volume, median $/sqft, sale-to-list %, % over-asking and
+    days-on-market per scope (Targets / Redwood City / Menlo Park /
+    Peninsula (other) / East Bay), back to 2016.
+  - a composite 0-100 "market temperature" (0 = deep buyer's market,
     100 = frenzied seller's market) per month.
-  - Seasonality: the average temperature / sale-to-list / DOM for each
-    calendar month, pooled across all years — i.e. which months of the
-    year structurally favor buyers vs sellers.
+  - seasonality: average temperature / sale-to-list / DOM per calendar month
+    pooled across all years — which months structurally favor buyers.
+  - pocket_ppsf: per-pocket monthly median $/sqft series (10y) that powers
+    the dashboard's long-run sold-trends chart.
 
 Non-fatal in update.sh: a failure here never blocks the listing dashboard.
 """
@@ -30,26 +31,7 @@ from homeharvest import scrape_property
 import fetch_data as fd
 
 DOCS = fd.DOCS
-LOOKBACK_DAYS = 1825            # 5 years for Redfin volume/ppsf/DOM
-S2L_DAYS = 1095                 # 3 years for Realtor sale-to-list
-# fine price bands so each Redfin response stays under the 350-row cap over 5y
-BANDS = ["max_price=1100000",
-         "min_price=1100001&max_price=1400000",
-         "min_price=1400001&max_price=1650000",
-         "min_price=1650001&max_price=1900000",
-         "min_price=1900001&max_price=2050000",
-         "min_price=2050001&max_price=2200000",
-         "min_price=2200001&max_price=2350000",
-         "min_price=2350001&max_price=2500000",
-         "min_price=2500001&max_price=2650000",
-         "min_price=2650001&max_price=2850000",
-         "min_price=2850001&max_price=3100000",
-         "min_price=3100001&max_price=3700000",
-         "min_price=3700001&max_price=4600000",
-         "min_price=4600001&max_price=6500000",
-         "min_price=6500001"]
-REGIONS = [("Redwood City", "region_id=15525&region_type=6"),
-           ("Menlo Park", "region_id=11961&region_type=6")]
+LOOKBACK_DAYS = 3650            # Realtor retains sold data a full 10 years back
 
 
 def med(xs):
@@ -104,67 +86,62 @@ def main():
     hoods = fd.load_neighborhoods()
     limits = fd.load_city_limits()
 
-    # ---- Redfin: 5y sold, per-home, classified into pockets ----
-    # month -> scope -> lists
-    ppsf = defaultdict(lambda: defaultdict(list))
-    dom = defaultdict(lambda: defaultdict(list))
-    vol = defaultdict(lambda: defaultdict(int))
-    for name, region in REGIONS:
-        print(f"[{datetime.now(timezone.utc).isoformat()}] {name}: 5y sold pull...")
-        for band in BANDS:
-            rows = fd.fetch_csv(region, f"sold_within_days={LOOKBACK_DAYS}&{band}")
-            if len(rows) >= 350:
-                print(f"  WARNING: {name} {band} hit 350-row cap", file=sys.stderr)
-            for r in rows:
-                city = (r.get("CITY") or "").strip()
-                if city.upper() in fd.EXCLUDE_CITIES:
-                    continue
-                sd = fd.parse_sold_date(r.get("SOLD DATE"))
-                price = fd.to_int(r.get("PRICE"))
-                sqft = fd.to_int(r.get("SQUARE FEET"))
-                if not sd or not price or not sqft:
-                    continue
-                lat, lon = fd.to_float(r.get("LATITUDE")), fd.to_float(r.get("LONGITUDE"))
-                zc = (r.get("ZIP OR POSTAL CODE") or "").strip()[:5]
-                pocket = fd.classify(lon, lat, zc, city, hoods, limits)
-                mk = month_key(sd)   # Redfin DOM is blank for sold rows; DOM comes from Realtor below
-                for scope in scope_of(pocket):
-                    ppsf[mk][scope].append(round(price / sqft))
-                    vol[mk][scope] += 1
-            time.sleep(2)
-
-    # ---- Realtor/HomeHarvest: 3y sale-to-list + days-on-market ----
-    s2l = defaultdict(lambda: defaultdict(list))       # month->scope->[ratio%]
+    # ---- Realtor/HomeHarvest: ONE 10-year sold pass over every covered city.
+    # Realtor retains sold price, list price, sqft and days-on-MLS a full decade
+    # back, so a single source now feeds ppsf/volume (all years), sale-to-list,
+    # DOM, the temperature composite, and the per-pocket $/sqft series.
+    ppsf = defaultdict(lambda: defaultdict(list))       # month->scope->[$psf]
+    dom = defaultdict(lambda: defaultdict(list))        # month->scope->[days]
+    vol = defaultdict(lambda: defaultdict(int))         # month->scope->count
+    s2l = defaultdict(lambda: defaultdict(list))        # month->scope->[ratio%]
     over = defaultdict(lambda: defaultdict(list))       # month->scope->[0/1]
-    s2l_cities = ["Redwood City, CA", "Menlo Park, CA", "Fremont, CA", "Union City, CA"] + \
-                 sorted(c + ", CA" for c in PENINSULA_OTHER)
-    for loc in s2l_cities:
+    pocket_ppsf = defaultdict(lambda: defaultdict(list))  # month->pocket->[$psf]
+
+    cities = ["Redwood City, CA", "Menlo Park, CA", "Atherton, CA",
+              "Fremont, CA", "Union City, CA"] + \
+             sorted(c + ", CA" for c in PENINSULA_OTHER)
+    for loc in cities:
         try:
             df = scrape_property(location=loc, listing_type="sold",
-                                 property_type=["single_family"], past_days=S2L_DAYS)
-            print(f"realtor {loc}: {len(df)} sold rows")
+                                 property_type=["single_family"],
+                                 past_days=LOOKBACK_DAYS)
+            print(f"realtor {loc}: {len(df)} sold rows (10y)")
         except Exception as e:
             print(f"realtor {loc} failed: {e}", file=sys.stderr)
             continue
         for _, r in df.iterrows():
-            lp, sp = fd.to_int(r.get("list_price")), fd.to_int(r.get("sold_price"))
+            sp = fd.to_int(r.get("sold_price"))
             sold = r.get("last_sold_date")
-            if not lp or not sp or lp <= 0 or sold is None or pd.isna(sold):
+            if not sp or sold is None or pd.isna(sold):
                 continue
             lat, lon = fd.to_float(r.get("latitude")), fd.to_float(r.get("longitude"))
             zc = str(r.get("zip_code") or "")[:5]
             city = str(r.get("city") or "")
             pocket = fd.classify(lon, lat, zc, city, hoods, limits)
             mk = month_key(str(sold)[:10])
-            ratio = sp / lp * 100
-            if ratio < 70 or ratio > 150:   # drop obvious data errors
-                continue
+            scopes_hit = scope_of(pocket)
+            sqft = fd.to_int(r.get("sqft"))
+            if sqft and sqft >= 1500:
+                p = round(sp / sqft)
+                if 150 <= p <= 4000:
+                    pocket_ppsf[mk][pocket].append(p)
+                    pocket_ppsf[mk]["All coverage"].append(p)
+                    for scope in scopes_hit:
+                        ppsf[mk][scope].append(p)
+            for scope in scopes_hit:
+                vol[mk][scope] += 1
+            lp = fd.to_int(r.get("list_price"))
+            if lp and lp > 0:
+                ratio = sp / lp * 100
+                if 70 <= ratio <= 150:      # drop obvious data errors
+                    for scope in scopes_hit:
+                        s2l[mk][scope].append(round(ratio, 1))
+                        over[mk][scope].append(1 if sp > lp else 0)
             dm = fd.to_int(r.get("days_on_mls"))
-            for scope in scope_of(pocket):
-                s2l[mk][scope].append(round(ratio, 1))
-                over[mk][scope].append(1 if sp > lp else 0)
-                if dm is not None and 0 <= dm <= 400:
+            if dm is not None and 0 <= dm <= 400:
+                for scope in scopes_hit:
                     dom[mk][scope].append(dm)
+        time.sleep(2)
 
     # ---- assemble monthly series + seasonality ----
     all_months = sorted(set(ppsf) | set(s2l))
@@ -201,15 +178,26 @@ def main():
         recent = [r["temp"] for r in monthly[s][-4:] if r["temp"] is not None]
         current[s] = round(st.mean(recent)) if recent else None
 
+    # ---- per-pocket monthly $/sqft series (10y) for the sold-trends chart ----
+    pocket_series = defaultdict(dict)
+    for mk in sorted(pocket_ppsf):
+        for pocket, vals in pocket_ppsf[mk].items():
+            if len(vals) >= 2 or pocket == "All coverage":
+                pocket_series[pocket][mk] = [int(st.median(vals)), len(vals)]
+    # keep only pockets with enough history to chart meaningfully
+    pocket_series = {p: v for p, v in pocket_series.items() if len(v) >= 12}
+
     out = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "scopes": scopes,
         "monthly": monthly,
         "seasonality": seasonality,
         "current_temp": current,
+        "pocket_ppsf": pocket_series,
     }
     (DOCS / "market.json").write_text(json.dumps(out, separators=(",", ":")))
     print(f"wrote docs/market.json: {len(all_months)} months, "
+          f"{len(pocket_series)} pocket series, "
           f"current temp Targets={current.get('Targets')}")
 
 

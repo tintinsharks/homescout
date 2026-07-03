@@ -37,10 +37,13 @@ BANDS = ["max_price=1100000",
          "min_price=1100001&max_price=1400000",
          "min_price=1400001&max_price=1650000",
          "min_price=1650001&max_price=1900000",
-         "min_price=1900001&max_price=2150000",
-         "min_price=2150001&max_price=2400000",
-         "min_price=2400001&max_price=2700000",
-         "min_price=2700001&max_price=3100000",
+         "min_price=1900001&max_price=2050000",
+         "min_price=2050001&max_price=2200000",
+         "min_price=2200001&max_price=2350000",
+         "min_price=2350001&max_price=2500000",
+         "min_price=2500001&max_price=2650000",
+         "min_price=2650001&max_price=2850000",
+         "min_price=2850001&max_price=3100000",
          "min_price=3100001&max_price=3700000",
          "min_price=3700001&max_price=4600000",
          "min_price=4600001&max_price=6500000",
@@ -113,16 +116,13 @@ def main():
                 lat, lon = fd.to_float(r.get("LATITUDE")), fd.to_float(r.get("LONGITUDE"))
                 zc = (r.get("ZIP OR POSTAL CODE") or "").strip()[:5]
                 pocket = fd.classify(lon, lat, zc, city, hoods, limits)
-                mk = month_key(sd)
-                d = fd.to_int(r.get("DAYS ON MARKET"))
+                mk = month_key(sd)   # Redfin DOM is blank for sold rows; DOM comes from Realtor below
                 for scope in scope_of(pocket):
                     ppsf[mk][scope].append(round(price / sqft))
-                    if d is not None:
-                        dom[mk][scope].append(d)
                     vol[mk][scope] += 1
             time.sleep(2)
 
-    # ---- Realtor/HomeHarvest: 3y sale-to-list ----
+    # ---- Realtor/HomeHarvest: 3y sale-to-list + days-on-market ----
     s2l = defaultdict(lambda: defaultdict(list))       # month->scope->[ratio%]
     over = defaultdict(lambda: defaultdict(list))       # month->scope->[0/1]
     for loc in ("Redwood City, CA", "Menlo Park, CA"):
@@ -146,9 +146,12 @@ def main():
             ratio = sp / lp * 100
             if ratio < 70 or ratio > 150:   # drop obvious data errors
                 continue
+            dm = fd.to_int(r.get("days_on_mls"))
             for scope in scope_of(pocket):
                 s2l[mk][scope].append(round(ratio, 1))
                 over[mk][scope].append(1 if sp > lp else 0)
+                if dm is not None and 0 <= dm <= 400:
+                    dom[mk][scope].append(dm)
 
     # ---- assemble monthly series + seasonality ----
     all_months = sorted(set(ppsf) | set(s2l))

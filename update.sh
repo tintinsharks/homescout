@@ -6,6 +6,10 @@ cd /Users/nprabhak/HomeScout || exit 1
 echo "----- $(date '+%Y-%m-%d %H:%M:%S') -----" >> logs/fetch.log
 /usr/bin/python3 fetch_data.py >> logs/fetch.log 2>&1 || { echo "FETCH FAILED" >> logs/fetch.log; exit 1; }
 ./.venv/bin/python enrich_data.py >> logs/fetch.log 2>&1 || echo "ENRICH FAILED (non-fatal)" >> logs/fetch.log
+# market temperature + seasonality: heavier (5y pull), refresh at most once/day
+if [ ! -f docs/market.json ] || [ -z "$(find docs/market.json -mtime -1 2>/dev/null)" ]; then
+  ./.venv/bin/python market_trends.py >> logs/fetch.log 2>&1 || echo "TRENDS FAILED (non-fatal)" >> logs/fetch.log
+fi
 
 git add -A
 if git diff --cached --quiet; then

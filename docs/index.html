@@ -124,6 +124,20 @@
   </div>
 
   <div class="panel">
+    <h2>🌡️ Market temperature <span class="hint">— buyer's ↔ seller's market: 0–100 blend of sale-to-list %, % over asking & days-on-market</span></h2>
+    <label style="font-size:13px;color:var(--muted)">Area
+      <select id="mktScope"><option>Targets</option><option>Redwood City</option><option>Menlo Park</option></select></label>
+    <div id="tempGauge" style="margin:14px 0"></div>
+    <div class="chartbox" style="height:260px"><canvas id="tempChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>📆 Seasonality <span class="hint">— the buyer's-vs-seller's tilt of each calendar month, averaged across 5 years. Taller/redder = hotter for sellers.</span></h2>
+    <div class="chartbox" style="height:300px"><canvas id="seasonChart"></canvas></div>
+    <div id="seasonNote" style="margin-top:10px;font-size:13.5px;color:var(--muted)"></div>
+  </div>
+
+  <div class="panel">
     <h2>Sold comps <span class="hint" id="soldCount"></span></h2>
     <div class="twrap"><table id="soldTable"></table></div>
   </div>
@@ -151,7 +165,8 @@ const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. C
   'CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks',
   'PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village',
   'ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
-let DATA = null, MAP = null, layerActive = null, layerSold = null, hoodLayer = null, drawLayer = null;
+let DATA = null, MARKET = null, MAP = null, layerActive = null, layerSold = null, hoodLayer = null, drawLayer = null;
+let tempChart = null, seasonChart = null;
 let state = { targetsOnly:true, customOnly:false, pockets:new Set(), sortA:['dom',1], sortS:['sold_date',-1] };
 
 /* ---------- user-drawn zones (persisted in this browser) ---------- */
@@ -513,6 +528,105 @@ function renderCharts() {
   scatterChart.update();
 }
 
+/* ---------- market temperature & seasonality ---------- */
+const MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function tempColor(t) {
+  if (t == null) return '#9aa4b5';
+  if (t >= 70) return '#dc2626';
+  if (t >= 55) return '#ea580c';
+  if (t >= 45) return '#d97706';
+  if (t >= 35) return '#0891b2';
+  return '#2563eb';
+}
+function tempLabel(t) {
+  if (t == null) return 'no data';
+  if (t >= 70) return "Strong seller's market";
+  if (t >= 55) return "Seller's market";
+  if (t >= 45) return 'Balanced, leaning seller';
+  if (t >= 35) return 'Balanced, leaning buyer';
+  return "Buyer's market";
+}
+
+function renderMarket() {
+  if (!MARKET) return;
+  const scope = $('mktScope').value;
+  const cur = MARKET.current_temp[scope];
+  const col = tempColor(cur);
+  $('tempGauge').innerHTML = `
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="font-size:40px;font-weight:800;color:${col};min-width:70px">${cur ?? '—'}</div>
+      <div>
+        <div style="font-weight:700;color:${col}">${tempLabel(cur)}</div>
+        <div style="color:var(--muted);font-size:12.5px">current reading (last 3 months) · 0 = deep buyer's market · 100 = frenzy</div>
+      </div>
+    </div>
+    <div style="position:relative;height:14px;border-radius:7px;margin-top:12px;
+      background:linear-gradient(90deg,#2563eb,#0891b2,#d97706,#ea580c,#dc2626)">
+      ${cur == null ? '' : `<div style="position:absolute;left:calc(${cur}% - 8px);top:-4px;width:16px;height:22px;
+        border:3px solid #fff;border-radius:5px;background:${col};box-shadow:0 1px 4px rgba(0,0,0,.3)"></div>`}
+    </div>
+    <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:11px;margin-top:3px">
+      <span>Buyer's</span><span>Balanced</span><span>Seller's</span></div>`;
+
+  const rows = MARKET.monthly[scope].filter(r => r.temp != null || r.s2l != null);
+  const labels = rows.map(r => r.month);
+  if (tempChart) tempChart.destroy();
+  tempChart = new Chart($('tempChart'), {
+    data: {
+      labels,
+      datasets: [
+        { type: 'line', label: 'Market temperature', yAxisID: 'y',
+          data: rows.map(r => r.temp), borderColor: '#dc2626', backgroundColor: '#dc262622',
+          fill: true, tension: 0.3, spanGaps: true, pointRadius: 0, borderWidth: 2 },
+        { type: 'line', label: 'Sale-to-list %', yAxisID: 'y2',
+          data: rows.map(r => r.s2l), borderColor: '#2563eb', tension: 0.3,
+          spanGaps: true, pointRadius: 0, borderWidth: 1.5, borderDash: [4, 3] },
+      ]
+    },
+    options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { title: { display: true, text: `${scope} — market temperature vs sale-to-list (3 yr)` },
+                 legend: { position: 'bottom' } },
+      scales: {
+        y: { position: 'left', min: 0, max: 100, title: { display: true, text: 'temperature' } },
+        y2: { position: 'right', title: { display: true, text: 'sale-to-list %' },
+              grid: { drawOnChartArea: false }, ticks: { callback: v => v + '%' } },
+        x: { ticks: { maxTicksLimit: 12, callback: function (v) { const l = this.getLabelForValue(v); return l.endsWith('-01') || l.endsWith('-07') ? l : ''; } } }
+      } }
+  });
+
+  const seas = MARKET.seasonality[scope];
+  const temps = [];
+  for (let m = 1; m <= 12; m++) temps.push(seas[m].temp);
+  if (seasonChart) seasonChart.destroy();
+  seasonChart = new Chart($('seasonChart'), {
+    type: 'bar',
+    data: { labels: MO, datasets: [{ label: 'Avg market temperature', data: temps,
+      backgroundColor: temps.map(tempColor) }] },
+    options: { maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        title: { display: true, text: `${scope} — seasonality: avg buyer/seller tilt by month (5 yr)` },
+        tooltip: { callbacks: { label: c => {
+          const s = seas[c.dataIndex + 1];
+          return `temp ${s.temp} · ${tempLabel(s.temp)} · sale-to-list ${s.s2l ?? '—'}% · ${s.dom ?? '—'} days on market`;
+        } } } },
+      scales: { y: { min: 0, max: 100, title: { display: true, text: 'hotter for sellers →' } } } }
+  });
+
+  // narrative: coldest (best-to-buy) & hottest months
+  const ranked = [];
+  for (let m = 1; m <= 12; m++) if (seas[m].temp != null) ranked.push([m, seas[m].temp]);
+  ranked.sort((a, b) => a[1] - b[1]);
+  if (ranked.length) {
+    const cold = ranked.slice(0, 3).map(x => MO[x[0] - 1]).join(', ');
+    const hot = ranked.slice(-3).reverse().map(x => MO[x[0] - 1]).join(', ');
+    const janDom = seas[1].dom, marDom = seas[3].dom;
+    $('seasonNote').innerHTML =
+      `<b>Best months to be a buyer in ${scope}:</b> ${cold} — least competition, lowest sale-to-list, homes sit longest` +
+      (janDom && marDom ? ` (e.g. ${Math.round(janDom)} days on market in Jan vs ${Math.round(marDom)} in Mar)` : '') +
+      `.<br><b>Toughest (seller-favored):</b> ${hot} — spring bidding peaks as tech bonuses/RSUs land and inventory is scarce.`;
+  }
+}
+
 /* ---------- map ---------- */
 function popup(h, sold) {
   const gem = (!sold && h.gem_pct != null)
@@ -630,6 +744,7 @@ function renderAll() {
   renderActive(meds);
   renderSoldTable();
   renderCharts();
+  renderMarket();
   renderMap();
   document.querySelectorAll('th[data-k]').forEach(el => el.onclick = () => {
     const key = el.dataset.k, t = el.dataset.t;
@@ -642,6 +757,7 @@ function renderAll() {
 async function load() {
   const r = await fetch('data.json?_=' + Date.now());
   DATA = await r.json();
+  try { MARKET = await (await fetch('market.json?_=' + Date.now())).json(); } catch (e) { MARKET = null; }
   const gen = new Date(DATA.generated_at);
   const ageMin = Math.round((Date.now() - gen) / 60000);
   $('updated').textContent = `data updated ${ageMin < 90 ? ageMin + ' min' : Math.round(ageMin / 60) + ' h'} ago`;
@@ -665,6 +781,7 @@ $('chipCustom').onclick = () => {
   renderAll();
 };
 ['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold'].forEach(id => $(id).onchange = renderAll);
+$('mktScope').onchange = renderMarket;
 load();
 setInterval(load, 30 * 60 * 1000); // re-pull data.json every 30 min
 </script>

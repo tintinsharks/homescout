@@ -27,7 +27,7 @@ GEOJSON_FILE = DOCS / "neighborhoods.geojson"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 BASE = "https://www.redfin.com/stingray/api/gis-csv"
-COMMON = "al=1&uipt=1&v=8&sf=1,2,3,5,6,7&status=9&num_homes=350"
+COMMON = "al=1&uipt=1,5&v=8&sf=1,2,3,5,6,7&status=9&num_homes=350"
 MIN_SQFT = 1800  # small buffer below the 2000 hard filter (UI default is 2000)
 
 ATHERTON_POLY = ("poly=-122.24+37.435,-122.17+37.435,-122.17+37.472,"
@@ -230,7 +230,9 @@ def norm_row(r: dict, hoods, limits):
     zipcode = (r.get("ZIP OR POSTAL CODE") or "").strip()[:5]
     pocket = classify(lon, lat, zipcode, city, hoods, limits)
     url_key = next((k for k in r if k.startswith("URL")), None)
+    ptype = (r.get("PROPERTY TYPE") or "").lower()
     return {
+        "type": "lot" if "land" in ptype else "home",
         "mls": (r.get("MLS#") or "").strip(),
         "address": (r.get("ADDRESS") or "").strip(),
         "city": (r.get("CITY") or "").strip(),
@@ -335,7 +337,7 @@ def send_alerts(active, prev_active):
     lines = []
     for h in active:
         high_gem = (h.get("gem_pct") or 0) >= 10 and h["price"] <= 3300000
-        if (not h["target"] and not high_gem) or h["sqft"] < 2000:
+        if h.get("type") == "lot" or (not h["target"] and not high_gem) or (h["sqft"] or 0) < 2000:
             continue
         old = prev.get(h["mls"])
         gem = f" · gem {h['gem_pct']:+.0f}%" if h.get("gem_pct") is not None else ""

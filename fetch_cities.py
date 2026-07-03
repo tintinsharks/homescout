@@ -79,6 +79,7 @@ def row_from(r, pocket, hoods=None, limits=None):
         pocket = fd.classify(lon, lat, zc, city, hoods or [], limits or [])
     fb, hb = i(r.get("full_baths")) or 0, i(r.get("half_baths")) or 0
     return {
+        "type": "home",
         "mls": s(r.get("mls_id")).strip(),
         "address": s(r.get("full_street_line")).strip(),
         "city": s(r.get("city")).strip(),
@@ -132,19 +133,21 @@ def main():
     eb_active, eb_sold = [], []
     for loc, pocket, want_solds in CITIES:
         for lt in ("for_sale", "pending"):
-            try:
-                df = scrape_property(location=loc, listing_type=lt,
-                                     property_type=["single_family"])
-            except Exception as e:
-                print(f"{loc} {lt} failed: {e}", file=sys.stderr)
-                continue
-            for _, r in df.iterrows():
-                h = row_from(r, pocket, hoods, limits)
-                if not h:      # actives: keep every size, even missing sqft
+            for ptype, typ in (("single_family", "home"), ("land", "lot")):
+                try:
+                    df = scrape_property(location=loc, listing_type=lt,
+                                         property_type=[ptype])
+                except Exception as e:
+                    print(f"{loc} {lt} {ptype} failed: {e}", file=sys.stderr)
                     continue
-                enrich_active(h, r)
-                eb_active.append(h)
-            print(f"{loc} {lt}: {len(df)} rows")
+                for _, r in df.iterrows():
+                    h = row_from(r, pocket, hoods, limits)
+                    if not h:      # actives: keep every size, even missing sqft
+                        continue
+                    h["type"] = typ
+                    enrich_active(h, r)
+                    eb_active.append(h)
+                print(f"{loc} {lt} {ptype}: {len(df)} rows")
         if not want_solds:     # core cities: Redfin already provides solds
             continue
         try:

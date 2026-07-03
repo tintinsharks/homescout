@@ -51,7 +51,7 @@
        color:#fff; margin-left:5px; vertical-align:1px; }
   .b.new { background:var(--new); } .b.cut { background:var(--cut); }
   .b.pend { background:var(--pend); } .b.oh { background:var(--accent2); }
-  .b.stale { background:#6b7280; } .b.opp { background:#0e7490; }
+  .b.stale { background:#6b7280; } .b.opp { background:#0e7490; } .b.lot { background:#4d7c0f; }
   tr.comps td { background:#f8fafc; white-space:normal; font-size:12.5px; color:var(--muted); }
   .expand { cursor:pointer; }
   .pos { color:var(--new); font-weight:600; } .neg { color:var(--bad); font-weight:600; }
@@ -83,6 +83,7 @@
     <label>Built <input type="number" id="fYearMin" placeholder="min" step="1" style="width:64px"> – <input type="number" id="fYearMax" placeholder="max" step="1" style="width:64px"></label>
     <label>Min beds <select id="fBeds"><option value="0">any</option><option selected>3</option><option>4</option><option>5</option></select></label>
     <label><input type="checkbox" id="fPending" style="width:auto"> show pending</label>
+    <label><input type="checkbox" id="fLots" checked style="width:auto"> 🌲 lots</label>
   </div>
 
   <div class="cards" id="kpis"></div>
@@ -238,12 +239,17 @@ function passFilters(h, isActive) {
     if (!state.targetsOnly && state.pockets.size && !state.pockets.has(h.pocket)) return false;
   }
   if (h.price > +$('fPrice').value) return false;
-  if (h.sqft != null && h.sqft < +$('fSqft').value) return false;  // unknown sqft stays visible
-  if (+$('fBeds').value && (h.beds || 0) < +$('fBeds').value) return false;
-  const ymin = +$('fYearMin').value, ymax = +$('fYearMax').value;
-  if (h.year != null) {
-    if (ymin && h.year < ymin) return false;
-    if (ymax && h.year > ymax) return false;
+  if (h.type === 'lot') {
+    if (isActive && !$('fLots').checked) return false;
+    // land: size/beds/built filters don't apply
+  } else {
+    if (h.sqft != null && h.sqft < +$('fSqft').value) return false;  // unknown sqft stays visible
+    if (+$('fBeds').value && (h.beds || 0) < +$('fBeds').value) return false;
+    const ymin = +$('fYearMin').value, ymax = +$('fYearMax').value;
+    if (h.year != null) {
+      if (ymin && h.year < ymin) return false;
+      if (ymax && h.year > ymax) return false;
+    }
   }
   if (isActive && !$('fPending').checked && /pending|contingent/i.test(h.status)) return false;
   return true;
@@ -258,6 +264,7 @@ function priceCut(h) {
 
 function badges(h) {
   let s = '';
+  if (h.type === 'lot') s += '<span class="b lot">LOT</span>';
   if (isNew(h)) s += '<span class="b new">NEW</span>';
   const cut = priceCut(h);
   if (cut) s += `<span class="b cut">CUT −${fmtK(cut)}</span>`;
@@ -746,7 +753,7 @@ function renderMap() {
   layerActive = L.layerGroup();
   const shownPts = [];
   DATA.active.filter(h => passFilters(h, true) && h.lat).forEach(h => {
-    const color = isNew(h) ? '#16a34a' : priceCut(h) ? '#d97706' : '#2563eb';
+    const color = h.type === 'lot' ? '#4d7c0f' : isNew(h) ? '#16a34a' : priceCut(h) ? '#d97706' : '#2563eb';
     L.circleMarker([h.lat, h.lon], { radius: 9, color: '#fff', fillColor: color, fillOpacity: 0.95, weight: 2 })
       .bindPopup(popup(h, false)).addTo(layerActive);
     shownPts.push([h.lat, h.lon]);
@@ -824,7 +831,7 @@ $('chipCustom').onclick = () => {
   if (state.customOnly) state.targetsOnly = false;
   renderAll();
 };
-['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold', 'fYearMin', 'fYearMax'].forEach(id => $(id).onchange = renderAll);
+['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold', 'fYearMin', 'fYearMax', 'fLots'].forEach(id => $(id).onchange = renderAll);
 $('mktScope').onchange = renderMarket;
 $('mFit').onclick = () => { if (lastShownPts.length) MAP.fitBounds(lastShownPts, { padding: [40, 40], maxZoom: 15 }); };
 load();

@@ -80,6 +80,7 @@
     <span id="pocketChips"></span>
     <label>Max price <input type="number" id="fPrice" value="3300000" step="50000"></label>
     <label>Min sqft <input type="number" id="fSqft" value="2000" step="100"></label>
+    <label>Built <input type="number" id="fYearMin" placeholder="min" step="1" style="width:64px"> – <input type="number" id="fYearMax" placeholder="max" step="1" style="width:64px"></label>
     <label>Min beds <select id="fBeds"><option value="0">any</option><option selected>3</option><option>4</option><option>5</option></select></label>
     <label><input type="checkbox" id="fPending" style="width:auto"> show pending</label>
   </div>
@@ -230,6 +231,11 @@ function passFilters(h, isActive) {
   if (h.price > +$('fPrice').value) return false;
   if (h.sqft < +$('fSqft').value) return false;
   if (+$('fBeds').value && (h.beds || 0) < +$('fBeds').value) return false;
+  const ymin = +$('fYearMin').value, ymax = +$('fYearMax').value;
+  if (h.year != null) {
+    if (ymin && h.year < ymin) return false;
+    if (ymax && h.year > ymax) return false;
+  }
   if (isActive && !$('fPending').checked && /pending|contingent/i.test(h.status)) return false;
   return true;
 }
@@ -780,7 +786,7 @@ $('chipCustom').onclick = () => {
   if (state.customOnly) state.targetsOnly = false;
   renderAll();
 };
-['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold'].forEach(id => $(id).onchange = renderAll);
+['fPrice', 'fSqft', 'fBeds', 'fPending', 'mSold', 'fYearMin', 'fYearMax'].forEach(id => $(id).onchange = renderAll);
 $('mktScope').onchange = renderMarket;
 load();
 setInterval(load, 30 * 60 * 1000); // re-pull data.json every 30 min

@@ -64,9 +64,29 @@ def main():
             h["flood_zone"] = flood
             n_flood += 1
 
+    slim(data)   # drop bytes the browser never reads → faster/more reliable Pages builds
     DATA_FILE.write_text(json.dumps(data, separators=(",", ":")))
     print(f"hazard-tagged {len(data['active'])} actives: "
           f"{n_fire} in fire zones, {n_flood} in flood zones")
+
+
+# fields the frontend never reads off a SOLD row (kept on actives)
+SOLD_DROP = ("type", "mls", "city", "zip", "open_house", "status")
+
+
+def slim(data):
+    for h in data["sold"]:
+        for k in SOLD_DROP:
+            h.pop(k, None)
+        # coords to ~11m precision; ppsf/price already ints
+        if h.get("lat") is not None:
+            h["lat"] = round(h["lat"], 4)
+            h["lon"] = round(h["lon"], 4)
+    for h in data["active"]:
+        if h.get("remarks"):
+            h["remarks"] = h["remarks"][:280]
+        if h.get("comps"):
+            h["comps"] = h["comps"][:4]
 
 
 if __name__ == "__main__":

@@ -237,7 +237,8 @@ function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alph
 const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel','EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central','CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks','PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village','ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
 let DATA=null, MARKET=null, MAP=null, layerActive=null, layerSold=null, hoodLayer=null, drawLayer=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null, lastShownPts=[], lastFitSig=null, hazLayer=null, hazLoaded=false;
-let state = { region:'Peninsula', sort:'Deal score', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(), areaExpanded:new Set(), areaSearch:'' };
+let state = { region:'Peninsula', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(), areaExpanded:new Set(), areaSearch:'' };
+const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
 const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle Hill','Edgewood Park','Canyon','Central','Centennial','Stambaugh-Heller','Redwood Oaks','Palm Park','Friendly Acres','Redwood Village','Roosevelt','Downtown','Bair Island','Redwood Shores','Emerald Hills (county)','Selby-Atherwood (county)','Other county']);
@@ -355,10 +356,13 @@ function regionAvgS2L(region){ const c=monthsAgoISO(12); const r=DATA.sold.filte
 function renderFeed(){
   const rows = DATA.active.filter(h=>passFilters(h,true));
   const scoreOf = h => { const s=dealScore(h); return s==null ? -999 : s; };
+  const dir = state.sortDir==='asc' ? 1 : -1;   // asc comparator, flipped for desc
   rows.sort((a,b)=>{
-    if (state.sort==='Fixer upside') return ((b.opp_flags||[]).length-(a.opp_flags||[]).length) || (scoreOf(b)-scoreOf(a));
-    if (state.sort==='Price') return a.price-b.price;
-    return scoreOf(b)-scoreOf(a);
+    let cmp;
+    if (state.sort==='Fixer upside') cmp = ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
+    else if (state.sort==='Price') cmp = a.price-b.price;
+    else cmp = scoreOf(a)-scoreOf(b);
+    return cmp*dir;
   });
   if (!rows.length){ $('feed').innerHTML='<div class="empty">Nothing matches — loosen a filter, or star listings to fill your Focus tab.</div>'; return; }
   $('feed').innerHTML = rows.map(h=>{
@@ -510,7 +514,7 @@ function renderMap(){
 
 function renderAll(){
   document.querySelectorAll('#tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset.r===state.region));
-  document.querySelectorAll('#tabs .sbtn').forEach(b=>b.classList.toggle('on',b.dataset.s===state.sort));
+  document.querySelectorAll('#tabs .sbtn').forEach(b=>{ const on=b.dataset.s===state.sort; b.classList.toggle('on',on); b.textContent=b.dataset.s+(on?(state.sortDir==='asc'?' ↑':' ↓'):''); });
   $('chipTargets').classList.toggle('on',state.targetsOnly);
   $('chipFixer').classList.toggle('on',state.fixerOnly);
   $('chipHaz').classList.toggle('on',state.avoidHaz);
@@ -538,7 +542,11 @@ $('areaTree').onclick=e=>{
 };
 $('areaSearch').oninput=()=>{ state.areaSearch=$('areaSearch').value; renderAreas(); };
 $('areaClear').onclick=()=>{ state.pockets.clear(); renderAll(); };
-document.querySelectorAll('#tabs .sbtn').forEach(b=>b.onclick=()=>{state.sort=b.dataset.s;renderAll();});
+document.querySelectorAll('#tabs .sbtn').forEach(b=>b.onclick=()=>{
+  if(state.sort===b.dataset.s){ state.sortDir = state.sortDir==='asc'?'desc':'asc'; }
+  else { state.sort=b.dataset.s; state.sortDir=SORT_DEFAULT[b.dataset.s]||'desc'; }
+  renderAll();
+});
 $('chipTargets').onclick=()=>{state.targetsOnly=!state.targetsOnly;renderAll();};
 $('chipFixer').onclick=()=>{state.fixerOnly=!state.fixerOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};

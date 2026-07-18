@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="830f20a94192ac7efa3d719a9139ef63">
+<meta name="build" content="777f6f660199eb435553ba5a1aba0e69">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -358,6 +358,7 @@ function renderFeed(){
     const specs=[h.beds!=null?`<b>${h.beds}</b> bd`:'', h.sqft?`<b>${h.sqft.toLocaleString()}</b> sf`:'', h.lot?`lot ${h.lot.toLocaleString()}`:'', h.year?`built ${h.year}`:''].filter(Boolean).join(' · ');
     const gvc = g!=null?` <span class="win" style="color:${g>=3?'#3c7d54':'var(--muted)'}">· ${(g>0?'+':'')+Math.round(g)}% comp</span>`:'';
     const avc = a!=null?` <span class="win" style="color:${a>=3?'#3c7d54':'var(--muted)'}">· ${(a>0?'+':'')+Math.round(a)}% AVM</span>`:'';
+    const domc = h.dom!=null?` <span class="sm">· ${h.dom} DOM</span>`:'';
     const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
     return `<div class="fcard">
       <a class="thumb" href="${h.url}" target="_blank"${h.photo?` style="background-image:url('${h.photo.replace(/'/g,'')}')"`:''}>${h.photo?'':'🏡'}</a>
@@ -365,7 +366,7 @@ function renderFeed(){
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span><span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
         <div class="chips">${chipsFor(h)}${agree}</div>
-        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}</span></div>
+        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}${domc}</span></div>
       </div>
       <span class="star${fav?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">${fav?'★':'☆'}</span>
     </div>`;

@@ -55,6 +55,8 @@
   .arow .nm { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .arow .ct { color:var(--faint); font-size:10.5px; font-variant-numeric:tabular-nums; }
   .areaclear { font-size:10px; font-weight:700; letter-spacing:.04em; color:var(--accent); cursor:pointer; }
+  .agroup { font-size:9.5px; font-weight:800; letter-spacing:.08em; color:var(--faint); margin:11px 2px 3px; padding-top:7px; border-top:1px solid var(--line2); }
+  .agroup:first-child { margin-top:2px; border-top:0; padding-top:0; }
   .miniinputs { display:flex; gap:8px; margin-top:12px; }
   .miniinputs label { flex:1; font-size:10px; font-weight:700; letter-spacing:.03em; color:var(--faint); }
   .miniinputs input, .miniinputs select { width:100%; border:1px solid var(--line); border-radius:7px; padding:5px 7px; font-size:13px; font-family:inherit; color:var(--ink); background:#fff; margin-top:3px; }
@@ -242,29 +244,43 @@ const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle H
 const MENLO_HOODS = new Set(['Menlo Park','West Menlo (county)']);
 function cityOf(pocket){ if(RWC_HOODS.has(pocket)) return 'Redwood City'; if(MENLO_HOODS.has(pocket)) return 'Menlo Park'; return pocket; }
 function areaTree(){ const t={}; DATA.active.forEach(h=>{ const c=cityOf(h.pocket); (t[c]=t[c]||{}); t[c][h.pocket]=(t[c][h.pocket]||0)+1; }); return t; }
+// group cities so the picker reads cleanly instead of one mixed alphabetical list
+const AREA_GROUPS = [
+  ['📍 Mid-Peninsula', ['Redwood City','Menlo Park','Atherton','San Carlos','Belmont','Woodside','Portola Valley']],
+  ['🌳 South Peninsula', ['Palo Alto','East Palo Alto']],
+  ['🏙️ North Peninsula', ['San Mateo','Foster City','Burlingame','Hillsborough','Millbrae','San Bruno','South San Francisco','Daly City']],
+  ['🌊 Coast', ['Pacifica','Half Moon Bay']],
+  ['🌉 East Bay', ['Fremont','Union City']],
+];
+function cityRowHTML(city, t, q){
+  const hoods=Object.keys(t[city]).sort();
+  const multi = hoods.length>1 || hoods[0]!==city;   // has real sub-neighborhoods
+  const total=hoods.reduce((s,p)=>s+t[city][p],0);
+  const matchCity=city.toLowerCase().includes(q);
+  const matchHoods=hoods.filter(p=>p.toLowerCase().includes(q));
+  if(q && !matchCity && !matchHoods.length) return '';
+  const selN=hoods.filter(p=>state.pockets.has(p)).length;
+  const cb=selN===0?'':(selN===hoods.length?'on':'part');
+  const exp = state.areaExpanded.has(city) || (q!=='' && matchHoods.length>0 && !matchCity);
+  let html=`<div class="arow" data-city="${city}"><span class="exp" data-exp="${city}">${multi?(exp?'▾':'▸'):''}</span><span class="cb ${cb}" data-pcity="${city}">${cb==='on'?'✓':cb==='part'?'–':''}</span><span class="nm">${city}</span><span class="ct">${total}</span></div>`;
+  if(multi && exp){
+    const show = (q && !matchCity) ? hoods.filter(p=>p.toLowerCase().includes(q)) : hoods;
+    show.forEach(p=>{ const on=state.pockets.has(p);
+      html+=`<div class="arow hood"><span class="exp"></span><span class="cb ${on?'on':''}" data-phood="${p}">${on?'✓':''}</span><span class="nm">${p.replace(' (county)','')}</span><span class="ct">${t[city][p]}</span></div>`;
+    });
+  }
+  return html;
+}
 function renderAreas(){
   const t=areaTree(), q=state.areaSearch.trim().toLowerCase();
   $('areaClear').style.display = state.pockets.size?'inline':'none';
-  const lab=document.querySelector('#areaTree').previousElementSibling; // not used
-  let html='';
-  Object.keys(t).sort().forEach(city=>{
-    const hoods=Object.keys(t[city]).sort();
-    const multi = hoods.length>1 || hoods[0]!==city;   // has real sub-neighborhoods
-    const total=hoods.reduce((s,p)=>s+t[city][p],0);
-    const matchCity=city.toLowerCase().includes(q);
-    const matchHoods=hoods.filter(p=>p.toLowerCase().includes(q));
-    if(q && !matchCity && !matchHoods.length) return;
-    const selN=hoods.filter(p=>state.pockets.has(p)).length;
-    const cb=selN===0?'':(selN===hoods.length?'on':'part');
-    const exp = state.areaExpanded.has(city) || (q!=='' && matchHoods.length>0 && !matchCity);
-    html+=`<div class="arow" data-city="${city}"><span class="exp" data-exp="${city}">${multi?(exp?'▾':'▸'):''}</span><span class="cb ${cb}" data-pcity="${city}">${cb==='on'?'✓':cb==='part'?'–':''}</span><span class="nm">${city}</span><span class="ct">${total}</span></div>`;
-    if(multi && exp){
-      const show = (q && !matchCity) ? hoods.filter(p=>p.toLowerCase().includes(q)) : hoods;
-      show.forEach(p=>{ const on=state.pockets.has(p);
-        html+=`<div class="arow hood"><span class="exp"></span><span class="cb ${on?'on':''}" data-phood="${p}">${on?'✓':''}</span><span class="nm">${p.replace(' (county)','')}</span><span class="ct">${t[city][p]}</span></div>`;
-      });
-    }
+  const placed=new Set(); let html='';
+  AREA_GROUPS.forEach(([label,cities])=>{
+    const rows=cities.filter(c=>t[c]).map(c=>{placed.add(c);return cityRowHTML(c,t,q);}).filter(Boolean).join('');
+    if(rows) html+=`<div class="agroup">${label}</div>`+rows;
   });
+  const orows=Object.keys(t).filter(c=>!placed.has(c)).sort().map(c=>cityRowHTML(c,t,q)).filter(Boolean).join('');
+  if(orows) html+=`<div class="agroup">Other</div>`+orows;
   $('areaTree').innerHTML=html||'<div style="font-size:11.5px;color:var(--faint);padding:8px 3px">No match.</div>';
 }
 function setCity(city,on){ const t=areaTree(); Object.keys(t[city]||{}).forEach(p=>on?state.pockets.add(p):state.pockets.delete(p)); }
@@ -298,13 +314,12 @@ function dealScore(h){
 const avmAgree = h => h.gem_pct!=null && h.vs_est_pct!=null && h.gem_pct>=3 && h.vs_est_pct>=3 && Math.abs(h.gem_pct-h.vs_est_pct)<=18;
 
 function passFilters(h, isActive){
+  // geographic scope + price + size apply to actives AND sold comps
   if (state.region === 'Focus') { if (!state.focus.has(focusKey(h))) return false; }
   else if (state.pockets.size) { if (!state.pockets.has(h.pocket)) return false; }
   else if (state.region && regionOf(h) !== state.region) return false;
   if (state.customOnly && !inZones(h)) return false;
   if (state.targetsOnly && !h.target) return false;
-  if (state.fixerOnly && !hasUpside(h)) return false;
-  if (state.avoidHaz && hasHaz(h)) return false;
   if (h.price < +$('fMin').value || h.price > +$('fPrice').value) return false;
   if (h.type === 'lot') { if (isActive && !state.showLots) return false; }
   else {
@@ -312,7 +327,12 @@ function passFilters(h, isActive){
     if (state.minBeds && (h.beds||0) < state.minBeds) return false;
     const ymin=+$('fYearMin').value; if (h.year!=null && ymin && h.year<ymin) return false;
   }
-  if (isActive && !state.showPending && /pending|contingent/i.test(h.status)) return false;
+  // fixer / hazard / pending are active-listing concepts (sold comps aren't enriched)
+  if (isActive){
+    if (state.fixerOnly && !hasUpside(h)) return false;
+    if (state.avoidHaz && hasHaz(h)) return false;
+    if (!state.showPending && /pending|contingent/i.test(h.status)) return false;
+  }
   return true;
 }
 state.minBeds = 0;
@@ -366,13 +386,18 @@ function renderFeed(){
   document.querySelectorAll('#feed .star').forEach(el=>el.onclick=()=>toggleFocus(decodeURIComponent(el.dataset.k)));
 }
 
+function bidScopeLabel(){
+  if (state.pockets.size){ const t=areaTree(); const cities=[...new Set([...state.pockets].map(cityOf))]; return cities.length===1?cities[0].toUpperCase():cities.length+' AREAS'; }
+  if (state.region==='Focus') return 'FOCUS';
+  return (state.region||'ALL').toUpperCase();
+}
 function renderBid(){
-  const region = state.region==='Focus'?'':state.region;
   const cutoff=monthsAgoISO(12);
-  const inR = h => (!region || regionOf(h)===region);
-  const filt = DATA.sold.filter(h=>inR(h) && h.s2l && h.sold_date>=cutoff && h.price>=+$('fMin').value && h.price<=+$('fPrice').value && (h.beds||0)>=state.minBeds);
-  const allSold = DATA.sold.filter(h=>inR(h)).sort((a,b)=>(b.sold_date||'').localeCompare(a.sold_date||''));
-  const scopeLab=(region||'ALL').toUpperCase();
+  // sold comps now honor every active filter (area, targets, price, beds, sqft, year)
+  const scoped = DATA.sold.filter(h=>passFilters(h,false));
+  const filt = scoped.filter(h=>h.s2l && h.sold_date>=cutoff);
+  const allSold = [...scoped].sort((a,b)=>(b.sold_date||'').localeCompare(a.sold_date||''));
+  const scopeLab=bidScopeLabel();
   if (filt.length<3){ $('bidStrip').innerHTML=`<div class="ey">💰 BIDDING INTEL · ${scopeLab} · LAST 12 MO</div><div style="font-size:12px;color:#cbb8a4">Not enough sales with list-price data in this scope.</div>`; return; }
   const s2l=median(filt.map(h=>h.s2l)), over=filt.filter(h=>h.s2l>100).length/filt.length*100;
   const doms=filt.map(h=>h.dom).filter(d=>d!=null);

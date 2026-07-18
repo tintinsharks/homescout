@@ -177,6 +177,7 @@
       <button class="sbtn on" data-s="Deal score">Deal score</button>
       <button class="sbtn" data-s="Fixer upside">Fixer upside</button>
       <button class="sbtn" data-s="Price">Price</button>
+      <button class="sbtn" data-s="Days listed">Days listed</button>
     </div>
 
     <div class="feed" id="feed"></div>
@@ -238,7 +239,7 @@ const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. C
 let DATA=null, MARKET=null, MAP=null, layerActive=null, layerSold=null, hoodLayer=null, drawLayer=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null, lastShownPts=[], lastFitSig=null, hazLayer=null, hazLoaded=false;
 let state = { region:'Peninsula', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(), areaExpanded:new Set(), areaSearch:'' };
-const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc' };
+const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
 const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle Hill','Edgewood Park','Canyon','Central','Centennial','Stambaugh-Heller','Redwood Oaks','Palm Park','Friendly Acres','Redwood Village','Roosevelt','Downtown','Bair Island','Redwood Shores','Emerald Hills (county)','Selby-Atherwood (county)','Other county']);
@@ -361,6 +362,7 @@ function renderFeed(){
     let cmp;
     if (state.sort==='Fixer upside') cmp = ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
     else if (state.sort==='Price') cmp = a.price-b.price;
+    else if (state.sort==='Days listed') cmp = (a.dom==null?1e9:a.dom)-(b.dom==null?1e9:b.dom);
     else cmp = scoreOf(a)-scoreOf(b);
     return cmp*dir;
   });

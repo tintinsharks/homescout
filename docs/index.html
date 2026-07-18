@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="f5326d4b38a4a35a42dde67a9daaeb6a">
+<meta name="build" content="b4ef855a833bcd5098cefef3b3bcb210">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -221,8 +221,8 @@ function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alph
 const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel','EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central','CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks','PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village','ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
 let DATA=null, MARKET=null, MAP=null, layerActive=null, layerSold=null, hoodLayer=null, drawLayer=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null, lastShownPts=[], lastFitSig=null, hazLayer=null, hazLoaded=false;
-const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza'];
-let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City']), areaSearch:'' };
+const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
+let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
 const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)

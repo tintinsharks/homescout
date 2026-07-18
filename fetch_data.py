@@ -77,7 +77,7 @@ CITY_LIMITS_FILE = ROOT / "city_limits.geojson"
 
 def fetch_csv(region: str, params: str):
     url = f"{BASE}?{COMMON}&{region}&{params}"
-    for attempt in range(3):
+    for attempt in range(5):   # Redfin blocks transiently; back off and retry
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -88,7 +88,7 @@ def fetch_csv(region: str, params: str):
             return [r for r in reader if r.get("SALE TYPE") in ("MLS Listing", "PAST SALE")]
         except Exception as e:
             print(f"  fetch attempt {attempt + 1} failed: {e}", file=sys.stderr)
-            time.sleep(10 * (attempt + 1))
+            time.sleep(15 * (attempt + 1))   # 15s,30s,45s,60s
     raise RuntimeError(f"all fetch attempts failed for: {params}")
 
 

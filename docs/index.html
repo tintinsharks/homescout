@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="d396dcde9621290451a12f43bd2cb076">
+<meta name="build" content="022894e4311ec1b35abedf40defaf4f6">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -129,6 +129,10 @@
         <div class="top"><span>PRICE RANGE</span><b id="priceLab"></b></div>
         <input type="range" id="fMin" min="500000" max="6000000" step="50000" value="1500000">
         <input type="range" id="fPrice" min="500000" max="6000000" step="50000" value="4500000" style="margin-top:5px">
+      </div>
+      <div class="field">
+        <div class="top"><span>MIN DEAL SCORE</span><b id="scoreLab"></b></div>
+        <input type="range" id="fMinScore" min="-35" max="40" step="1" value="-35">
       </div>
       <div class="field">
         <div class="top"><span>MIN BEDS</span></div>
@@ -308,11 +312,12 @@ function passFilters(h, isActive){
     if (state.minBeds && (h.beds||0) < state.minBeds) return false;
     const ymin=+$('fYearMin').value; if (h.year!=null && ymin && h.year<ymin) return false;
   }
-  // fixer / hazard / pending are active-listing concepts (sold comps aren't enriched)
+  // fixer / hazard / pending / deal-score are active-listing concepts (sold comps aren't enriched)
   if (isActive){
     if (state.fixerOnly && !hasUpside(h)) return false;
     if (state.avoidHaz && hasHaz(h)) return false;
     if (!state.showPending && /pending|contingent/i.test(h.status)) return false;
+    const ms=+$('fMinScore').value; if (ms>-35){ const s=dealScore(h); if(s==null||s<ms) return false; }
   }
   return true;
 }
@@ -467,6 +472,7 @@ function renderAll(){
   $('chipPending').classList.toggle('on',state.showPending);
   $('chipLots').classList.toggle('on',state.showLots);
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
+  const ms=+$('fMinScore').value; $('scoreLab').textContent = ms<=-35 ? 'any' : (ms>0?'+':'')+ms+' or better';
   renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderCharts(); renderMarket(); renderSoldTable();
 }
 const BUILD = document.querySelector('meta[name=build]')?.content || 'dev';
@@ -508,7 +514,7 @@ $('chipFixer').onclick=()=>{state.fixerOnly=!state.fixerOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};
 $('chipPending').onclick=()=>{state.showPending=!state.showPending;renderAll();};
 $('chipLots').onclick=()=>{state.showLots=!state.showLots;renderAll();};
-['fMin','fPrice','fSqft','fYearMin'].forEach(id=>$(id).oninput=renderAll);
+['fMin','fPrice','fSqft','fYearMin','fMinScore'].forEach(id=>$(id).oninput=renderAll);
 $('mktScope').onchange=renderMarket; $('tRange').onchange=renderCharts;
 load();
 setInterval(load, 30*60*1000);

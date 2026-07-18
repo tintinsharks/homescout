@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache">
+<meta name="build" content="ef3d8b395c76f49c079290900fab0abd">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -525,6 +527,16 @@ function renderAll(){
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
   renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderOH(); renderCharts(); renderMarket(); renderSoldTable(); renderMap();
 }
+const BUILD = document.querySelector('meta[name=build]')?.content || 'dev';
+async function checkVersion(){   // reload once if a newer page has deployed (beats stale browser/CDN cache)
+  try{
+    const t = await (await fetch('index.html?v='+Date.now(), {cache:'no-store'})).text();
+    const fresh = new DOMParser().parseFromString(t,'text/html').querySelector('meta[name=build]')?.content;
+    if(fresh && fresh!==BUILD && sessionStorage.getItem('hs_reload_for')!==fresh){
+      sessionStorage.setItem('hs_reload_for', fresh); location.reload();
+    }
+  }catch(e){}
+}
 async function load(){
   const r=await fetch('data.json?_='+Date.now()); DATA=await r.json();
   try{ MARKET=await (await fetch('market.json?_='+Date.now())).json(); }catch(e){ MARKET=null; }
@@ -560,6 +572,8 @@ $('mFit').onclick=()=>{if(lastShownPts.length)MAP.fitBounds(lastShownPts,{paddin
 $('mHaz').onchange=async()=>{ if($('mHaz').checked){ if(!hazLoaded){ const gj=await (await fetch('hazards.geojson')).json(); hazLayer=L.geoJSON(gj,{style:f=>{const p=f.properties;if(p.kind==='fire'){const vh=p.cls==='Very High';return {color:vh?'#b0472a':'#d97706',weight:.5,fillColor:vh?'#b0472a':'#d97706',fillOpacity:vh?.22:.13};}const sfha=p.cls!=='X-0.2%';return {color:'#3f6f8a',weight:.5,fillColor:'#3f6f8a',fillOpacity:sfha?.25:.10};},onEachFeature:(f,l)=>l.bindTooltip(f.properties.kind==='fire'?`Fire hazard: ${f.properties.cls}`:`Flood zone: ${f.properties.cls}`,{sticky:true})}); hazLoaded=true; } hazLayer.addTo(MAP); } else if(hazLayer){ hazLayer.remove(); } };
 load();
 setInterval(load, 30*60*1000);
+setTimeout(checkVersion, 8000);          // catch a stale initial load quickly
+setInterval(checkVersion, 20*60*1000);   // and every 20 min after
 </script>
 </body>
 </html>

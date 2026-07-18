@@ -13,6 +13,16 @@ if [ ! -f docs/market.json ] || [ -z "$(find docs/market.json -mtime -1 2>/dev/n
   ./.venv/bin/python market_trends.py >> logs/fetch.log 2>&1 || echo "TRENDS FAILED (non-fatal)" >> logs/fetch.log
 fi
 
+# stamp docs/index.html with a content-hash build id (ignoring the stamp line
+# itself) so the page auto-reloads clients ONLY when its code actually changes,
+# not on data-only refreshes.
+NEWHASH=$(sed 's/<meta name="build" content="[^"]*"/<meta name="build" content="X"/' docs/index.html | md5 -q 2>/dev/null || sed 's/<meta name="build" content="[^"]*"/<meta name="build" content="X"/' docs/index.html | md5sum | cut -d' ' -f1)
+CURSTAMP=$(sed -n 's/.*<meta name="build" content="\([^"]*\)".*/\1/p' docs/index.html | head -1)
+if [ "$NEWHASH" != "$CURSTAMP" ]; then
+  sed -i '' "s/<meta name=\"build\" content=\"[^\"]*\"/<meta name=\"build\" content=\"$NEWHASH\"/" docs/index.html
+  echo "stamped build $NEWHASH" >> logs/fetch.log
+fi
+
 git add -A
 if git diff --cached --quiet; then
   echo "no changes" >> logs/fetch.log

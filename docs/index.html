@@ -232,6 +232,18 @@ const hasUpside = h => (h.opp_flags && h.opp_flags.length) > 0;
 const hasHaz = h => !!(h.fire_zone || h.flood_zone);
 const isNew = h => (h.dom != null && h.dom <= 4);
 function priceCut(h){ if(!h.price_history||h.price_history.length<2) return 0; const max=Math.max(...h.price_history.map(p=>p[1])); return max>h.price?max-h.price:0; }
+// Confidence-adjusted deal score: blend the comp-model gem with the independent
+// Realtor AVM, weighted toward the more conservative estimate so a listing the
+// AVM contradicts (duplex/teardown comp artifacts) sinks, and one both models
+// agree on rises. Returns null when neither signal exists.
+function dealScore(h){
+  const g=h.gem_pct, a=h.vs_est_pct;
+  if (g==null && a==null) return null;
+  if (g==null) return a;
+  if (a==null) return g;
+  return Math.round(Math.min(g,a)*0.6 + Math.max(g,a)*0.4);
+}
+const avmAgree = h => h.gem_pct!=null && h.vs_est_pct!=null && Math.sign(h.gem_pct)===Math.sign(h.vs_est_pct) && Math.abs(h.gem_pct-h.vs_est_pct)<=18;
 
 function passFilters(h, isActive){
   if (state.region === 'Focus') { if (!state.focus.has(focusKey(h))) return false; }
@@ -269,7 +281,7 @@ function regionAvgS2L(region){ const c=monthsAgoISO(12); const r=DATA.sold.filte
 
 function renderFeed(){
   const rows = DATA.active.filter(h=>passFilters(h,true));
-  const scoreOf = h => h.gem_pct==null ? -999 : h.gem_pct;
+  const scoreOf = h => { const s=dealScore(h); return s==null ? -999 : s; };
   rows.sort((a,b)=>{
     if (state.sort==='Fixer upside') return ((b.opp_flags||[]).length-(a.opp_flags||[]).length) || (scoreOf(b)-scoreOf(a));
     if (state.sort==='Price') return a.price-b.price;
@@ -277,19 +289,23 @@ function renderFeed(){
   });
   if (!rows.length){ $('feed').innerHTML='<div class="empty">Nothing matches — loosen a filter, or star listings to fill your Focus tab.</div>'; return; }
   $('feed').innerHTML = rows.map(h=>{
-    const g=h.gem_pct, sv=g==null?'—':(g>0?'+':'')+Math.round(g);
-    const spineBg=g>=8?'#e2efe6':g>=3?'#f6ead2':g>=0?'#f3e5d2':'#f5ddd8';
-    const spineC=g>=8?'#3c7d54':g>=3?'#a3752a':g>=0?'#a06b33':'#b0472a';
+    const ds=dealScore(h), g=h.gem_pct, a=h.vs_est_pct;
+    const sv=ds==null?'—':(ds>0?'+':'')+Math.round(ds);
+    const spineBg=ds>=8?'#e2efe6':ds>=3?'#f6ead2':ds>=0?'#f3e5d2':'#f5ddd8';
+    const spineC=ds>=8?'#3c7d54':ds>=3?'#a3752a':ds>=0?'#a06b33':'#b0472a';
     const stc=/pending|contingent/i.test(h.status)?'#c8a13a':'#4f9d6a';
     const win=h.list_price==null && h.price ? Math.round(h.price*regionAvgS2L(regionOf(h))/100/5000)*5000 : null;
     const fav=state.focus.has(focusKey(h));
     const specs=[h.beds!=null?`<b>${h.beds}</b> bd`:'', h.sqft?`<b>${h.sqft.toLocaleString()}</b> sf`:'', h.lot?`lot ${h.lot.toLocaleString()}`:'', h.year?`built ${h.year}`:''].filter(Boolean).join(' · ');
+    const gvc = g!=null?` <span class="win" style="color:${g>=3?'#3c7d54':'var(--muted)'}">· ${(g>0?'+':'')+Math.round(g)}% comp</span>`:'';
+    const avc = a!=null?` <span class="win" style="color:${a>=3?'#3c7d54':'var(--muted)'}">· ${(a>0?'+':'')+Math.round(a)}% AVM</span>`:'';
+    const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
     return `<div class="fcard">
       <div class="spine" style="background:${spineBg};color:${spineC}"><span class="sv">${sv}</span><span class="sl">SCORE</span></div>
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span><span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
-        <div class="chips">${chipsFor(h)}</div>
-        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${h.gem_pct!=null?` <span class="win" style="color:${g>=3?'#3c7d54':'var(--muted)'}">· ${sv}% vs comp</span>`:''}</span></div>
+        <div class="chips">${chipsFor(h)}${agree}</div>
+        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}</span></div>
       </div>
       <span class="star${fav?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">${fav?'★':'☆'}</span>
     </div>`;

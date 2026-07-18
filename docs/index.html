@@ -22,7 +22,8 @@
   a { color:var(--accent); text-decoration:none; } a:hover { color:var(--accent-d); }
   h2,h3 { font-family:'Newsreader',serif; font-weight:600; }
   .wrap { max-width:1320px; margin:0 auto; padding:22px; display:grid; grid-template-columns:290px minmax(0,1fr); gap:22px; align-items:start; }
-  @media (max-width:960px){ .wrap { grid-template-columns:1fr; } }
+  .wrap > aside, .wrap > main { min-width:0; }
+  @media (max-width:960px){ .wrap { grid-template-columns:minmax(0,1fr); } }
   .rail { position:sticky; top:22px; display:flex; flex-direction:column; gap:16px; }
   @media (max-width:960px){ .rail { position:static; } }
   .brand { display:flex; align-items:center; gap:11px; }
@@ -81,7 +82,8 @@
   .chip.oh { background:#dce8f5; color:#2a5f9e; } .chip.cut { background:#f6e3cf; color:#9a6a1e; }
   .fmeta { display:flex; align-items:baseline; gap:6px 14px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
   .fmeta .spec { font-size:12px; color:#4a3f31; white-space:nowrap; }
-  .fmeta .money { white-space:nowrap; margin-left:auto; }
+  .fmeta .money { margin-left:auto; text-align:right; }
+  .fmeta .money .price, .fmeta .money .win { white-space:nowrap; }
   .fmeta .price { font-size:16px; font-weight:700; } .fmeta .sm { font-size:11px; color:var(--muted); }
   .fmeta .win { font-size:11px; font-weight:700; color:var(--accent); }
   .star { align-self:center; cursor:pointer; font-size:19px; color:#c9bca8; } .star.on { color:var(--amber); }

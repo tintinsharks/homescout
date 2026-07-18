@@ -4,16 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="ef3d8b395c76f49c079290900fab0abd">
+<meta name="build" content="cdca930d9308251b62fac69cb6d20adf">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Libre+Franklin:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css">
-<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <style>
   :root { --bg:#f6f1e9; --card:#fffdf9; --ink:#33291f; --muted:#8a7d6d; --faint:#a89b86;
@@ -106,8 +102,6 @@
   .star { align-self:center; cursor:pointer; font-size:19px; color:#c9bca8; } .star.on { color:var(--amber); }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 18px; margin-top:18px; box-shadow:0 3px 14px rgba(58,42,32,.05); }
   .panel h2 { font-size:18px; margin:0 0 12px; } .panel h2 .hint { font-family:'Libre Franklin',sans-serif; font-weight:400; color:var(--muted); font-size:12px; }
-  #map { height:460px; border-radius:12px; z-index:1; }
-  .maptoggle { display:flex; gap:14px; margin:10px 2px 0; font-size:12.5px; color:var(--muted); flex-wrap:wrap; align-items:center; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th { text-align:left; color:var(--faint); font-weight:700; font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; padding:8px; border-bottom:1px solid var(--line); cursor:pointer; white-space:nowrap; }
   td { padding:9px 8px; border-bottom:1px solid var(--line2); white-space:nowrap; font-variant-numeric:tabular-nums; }
@@ -119,8 +113,6 @@
   .chartbox { position:relative; height:320px; }
   .empty { color:var(--muted); padding:22px; text-align:center; }
   .refresh { font-size:11px; color:var(--muted); margin-top:4px; }
-  .leaflet-popup-content { font-size:13px; line-height:1.45; font-family:'Libre Franklin',sans-serif; }
-  .leaflet-container { font-family:'Libre Franklin',sans-serif; background:#eee7db; }
 </style>
 </head>
 <body>
@@ -183,17 +175,6 @@
     </div>
 
     <div class="feed" id="feed"></div>
-
-    <div class="panel">
-      <h2>Map <span class="hint">— pins = active · dots = sold · shaded = target pockets · ⬠ draw your own area</span></h2>
-      <div id="map"></div>
-      <div class="maptoggle">
-        <button class="sbtn" id="mFit">⤢ Fit to results</button>
-        <label><input type="checkbox" id="mSold" checked style="width:auto"> show sold (12 mo)</label>
-        <label><input type="checkbox" id="mHaz" style="width:auto"> 🔥🌊 hazard zones</label>
-        <span>● sold dot: <span style="color:#4f9d6a">≤ $950</span> · <span style="color:#c98a2e">≤ $1,200</span> · <span style="color:#cf5340">&gt; $1,200</span> /sqft</span>
-      </div>
-    </div>
 
     <div class="panel">
       <h2>📅 Open houses <span class="hint">— upcoming, in scope, best gems first</span></h2>
@@ -490,31 +471,6 @@ function renderMarket(){
     $('seasonNote').innerHTML=`<b>Best months to buy in ${scope}:</b> ${cold} — least competition, homes sit longest.<br><b>Toughest (seller-favored):</b> ${hot} — spring bidding peaks.`; }
 }
 
-function popup(h,sold){ const gem=(!sold&&h.gem_pct!=null)?`<br>Comp ${fmtK(h.expected_price)} → <b class="${h.gem_pct>=5?'pos':''}">${h.gem_pct>0?'+':''}${Math.round(h.gem_pct)}% gem</b>`:''; return `<b>${addr(h)}</b><br><span class="pocket-tag${h.target?' t':''}">${h.pocket}</span><br>${fmt$(h.price)} · ${h.beds??'?'}bd · ${h.sqft?h.sqft.toLocaleString():'?'} sqft${sold?`<br>Sold ${h.sold_date}`:`<br>${h.status||''}`}${gem}<br><a href="${h.url}" target="_blank">View on Redfin →</a>`; }
-function fitSignature(){ return (state.customOnly?'custom':(state.region||'')+'|'+(state.targetsOnly?'T':'')); }
-function renderMap(){
-  if(!MAP){
-    MAP=L.map('map',{preferCanvas:true}).setView([37.462,-122.225],12);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{attribution:'© OpenStreetMap © CARTO',maxZoom:19,subdomains:'abcd'}).addTo(MAP);
-    fetch('city_limits.geojson').then(r=>r.json()).then(gj=>{L.geoJSON(gj,{filter:f=>f.properties.NAME!=='REDWOOD CITY',style:f=>{const nm=f.properties.NAME==='ATHERTON'?'Atherton':'Menlo Park';const t=DATA.target_pockets.includes(nm);const c=POCKET_COLORS[nm];return {color:c,weight:t?2.2:1.4,fillColor:c,fillOpacity:t?.10:.02,dashArray:t?null:'2 5'};},onEachFeature:(f,l)=>l.bindTooltip(f.properties.NAME==='ATHERTON'?'Atherton':'Menlo Park',{sticky:true})}).addTo(MAP);}).catch(()=>{});
-    fetch('neighborhoods.geojson').then(r=>r.json()).then(gj=>{hoodLayer=L.geoJSON(gj,{style:f=>{const nm=NB_MAP[f.properties.NB_Area]||f.properties.NB_Area;const t=DATA.target_pockets.includes(nm);const c=t?colorFor(nm):'#a89b86';return {color:c,weight:t?2.2:1,fillColor:c,fillOpacity:t?.13:.03,dashArray:t?null:'4 4'};},onEachFeature:(f,l)=>l.bindTooltip(NB_MAP[f.properties.NB_Area]||f.properties.NB_Area,{sticky:true})}).addTo(MAP);}).catch(()=>{});
-    Object.entries(DATA.extra_polys||{}).forEach(([nm,pts])=>{const c=colorFor(nm);L.polygon(pts.map(([lo,la])=>[la,lo]),{color:c,weight:2.2,fillColor:c,fillOpacity:.13}).bindTooltip(nm,{sticky:true}).addTo(MAP);});
-    drawLayer=new L.FeatureGroup().addTo(MAP);
-    loadZones().forEach(ring=>drawLayer.addLayer(L.polygon(ring,{color:'#c0552f',weight:2,fillColor:'#c0552f',fillOpacity:.08,dashArray:'6 4'})));
-    MAP.addControl(new L.Control.Draw({position:'topleft',draw:{polygon:{shapeOptions:{color:'#c0552f',weight:2,fillOpacity:.08,dashArray:'6 4'},allowIntersection:false,showArea:false},polyline:false,rectangle:false,circle:false,marker:false,circlemarker:false},edit:{featureGroup:drawLayer}}));
-    MAP.on(L.Draw.Event.CREATED,e=>{drawLayer.addLayer(e.layer);saveZones();state.customOnly=true;renderAll();});
-    MAP.on(L.Draw.Event.EDITED,()=>{saveZones();renderAll();});
-    MAP.on(L.Draw.Event.DELETED,()=>{saveZones();if(!zoneRings().length)state.customOnly=false;renderAll();});
-  }
-  if(layerActive)layerActive.remove(); if(layerSold)layerSold.remove();
-  layerSold=L.layerGroup();
-  if($('mSold').checked){ DATA.sold.filter(h=>passFilters(h,false)&&h.lat&&h.sold_date>=monthsAgoISO(12)).forEach(h=>{const c=h.ppsf<=950?'#4f9d6a':h.ppsf<=1200?'#c98a2e':'#cf5340';L.circleMarker([h.lat,h.lon],{radius:4,color:c,fillColor:c,fillOpacity:.55,weight:1}).bindPopup(popup(h,true)).addTo(layerSold);}); }
-  layerSold.addTo(MAP);
-  layerActive=L.layerGroup(); const pts=[];
-  DATA.active.filter(h=>passFilters(h,true)&&h.lat).forEach(h=>{const color=h.type==='lot'?'#6b8f3a':isNew(h)?'#4f9d6a':priceCut(h)?'#c98a2e':'#c0552f';L.circleMarker([h.lat,h.lon],{radius:9,color:'#fff',fillColor:color,fillOpacity:.95,weight:2}).bindPopup(popup(h,false)).addTo(layerActive);pts.push([h.lat,h.lon]);});
-  layerActive.addTo(MAP); lastShownPts=pts;
-  if(pts.length&&fitSignature()!==lastFitSig){MAP.fitBounds(pts,{padding:[40,40],maxZoom:14});lastFitSig=fitSignature();}
-}
 
 function renderAll(){
   document.querySelectorAll('#tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset.r===state.region));
@@ -525,7 +481,7 @@ function renderAll(){
   $('chipPending').classList.toggle('on',state.showPending);
   $('chipLots').classList.toggle('on',state.showLots);
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
-  renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderOH(); renderCharts(); renderMarket(); renderSoldTable(); renderMap();
+  renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderOH(); renderCharts(); renderMarket(); renderSoldTable();
 }
 const BUILD = document.querySelector('meta[name=build]')?.content || 'dev';
 async function checkVersion(){   // reload once if a newer page has deployed (beats stale browser/CDN cache)
@@ -566,10 +522,8 @@ $('chipFixer').onclick=()=>{state.fixerOnly=!state.fixerOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};
 $('chipPending').onclick=()=>{state.showPending=!state.showPending;renderAll();};
 $('chipLots').onclick=()=>{state.showLots=!state.showLots;renderAll();};
-['fMin','fPrice','fSqft','fYearMin','mSold'].forEach(id=>$(id).oninput=renderAll);
+['fMin','fPrice','fSqft','fYearMin'].forEach(id=>$(id).oninput=renderAll);
 $('mktScope').onchange=renderMarket; $('tRange').onchange=renderCharts;
-$('mFit').onclick=()=>{if(lastShownPts.length)MAP.fitBounds(lastShownPts,{padding:[40,40],maxZoom:15});};
-$('mHaz').onchange=async()=>{ if($('mHaz').checked){ if(!hazLoaded){ const gj=await (await fetch('hazards.geojson')).json(); hazLayer=L.geoJSON(gj,{style:f=>{const p=f.properties;if(p.kind==='fire'){const vh=p.cls==='Very High';return {color:vh?'#b0472a':'#d97706',weight:.5,fillColor:vh?'#b0472a':'#d97706',fillOpacity:vh?.22:.13};}const sfha=p.cls!=='X-0.2%';return {color:'#3f6f8a',weight:.5,fillColor:'#3f6f8a',fillOpacity:sfha?.25:.10};},onEachFeature:(f,l)=>l.bindTooltip(f.properties.kind==='fire'?`Fire hazard: ${f.properties.cls}`:`Flood zone: ${f.properties.cls}`,{sticky:true})}); hazLoaded=true; } hazLayer.addTo(MAP); } else if(hazLayer){ hazLayer.remove(); } };
 load();
 setInterval(load, 30*60*1000);
 setTimeout(checkVersion, 8000);          // catch a stale initial load quickly

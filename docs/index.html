@@ -42,6 +42,19 @@
   .togs { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
   .tog { border:1px solid var(--line); background:#fbf7ef; border-radius:10px; padding:8px 12px; font-size:12.5px; font-weight:600; cursor:pointer; color:#6b5e4e; text-align:left; font-family:inherit; }
   .tog.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #areaSearch { width:100%; border:1px solid var(--line); border-radius:8px; padding:6px 9px; font-size:12.5px; font-family:inherit; color:var(--ink); background:#fff; margin-top:11px; }
+  .areatree { max-height:250px; overflow-y:auto; margin-top:8px; }
+  .arow { display:flex; align-items:center; gap:7px; padding:4px 3px; font-size:12.5px; cursor:pointer; border-radius:6px; user-select:none; }
+  .arow:hover { background:#faf6ee; }
+  .arow.hood { padding-left:8px; }
+  .arow .exp { width:13px; flex:none; text-align:center; color:var(--faint); font-size:9px; }
+  .arow .cb { width:15px; height:15px; border:1.5px solid var(--line); border-radius:4px; flex:none; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; color:#fff; line-height:1; }
+  .arow .cb.on { background:var(--accent); border-color:var(--accent); }
+  .arow .cb.part { background:var(--amber); border-color:var(--amber); }
+  .arow.hood .nm { color:#6b5e4e; font-size:12px; }
+  .arow .nm { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .arow .ct { color:var(--faint); font-size:10.5px; font-variant-numeric:tabular-nums; }
+  .areaclear { font-size:10px; font-weight:700; letter-spacing:.04em; color:var(--accent); cursor:pointer; }
   .miniinputs { display:flex; gap:8px; margin-top:12px; }
   .miniinputs label { flex:1; font-size:10px; font-weight:700; letter-spacing:.03em; color:var(--faint); }
   .miniinputs input, .miniinputs select { width:100%; border:1px solid var(--line); border-radius:7px; padding:5px 7px; font-size:13px; font-family:inherit; color:var(--ink); background:#fff; margin-top:3px; }
@@ -138,6 +151,11 @@
       </div>
     </div>
     <div class="box">
+      <div class="lab" style="display:flex;justify-content:space-between;align-items:center">AREAS<span class="areaclear" id="areaClear" style="display:none">✕ clear</span></div>
+      <input type="text" id="areaSearch" placeholder="Filter cities & neighborhoods…" autocomplete="off">
+      <div class="areatree" id="areaTree"></div>
+    </div>
+    <div class="box">
       <div class="lab" id="railTempLab">MARKET TEMP</div>
       <div class="tempbar"><div class="k" id="railTempK"></div></div>
       <div style="font-size:11.5px;color:#6b5e4e;margin-top:9px" id="railTempTxt"></div>
@@ -217,7 +235,40 @@ function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alph
 const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel','EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central','CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks','PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village','ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
 let DATA=null, MARKET=null, MAP=null, layerActive=null, layerSold=null, hoodLayer=null, drawLayer=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null, lastShownPts=[], lastFitSig=null, hazLayer=null, hazLoaded=false;
-let state = { region:'Peninsula', sort:'Deal score', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus() };
+let state = { region:'Peninsula', sort:'Deal score', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(), areaExpanded:new Set(), areaSearch:'' };
+
+// pockets that are neighborhoods WITHIN a city (everything else is its own city)
+const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle Hill','Edgewood Park','Canyon','Central','Centennial','Stambaugh-Heller','Redwood Oaks','Palm Park','Friendly Acres','Redwood Village','Roosevelt','Downtown','Bair Island','Redwood Shores','Emerald Hills (county)','Selby-Atherwood (county)','Other county']);
+const MENLO_HOODS = new Set(['Menlo Park','West Menlo (county)']);
+function cityOf(pocket){ if(RWC_HOODS.has(pocket)) return 'Redwood City'; if(MENLO_HOODS.has(pocket)) return 'Menlo Park'; return pocket; }
+function areaTree(){ const t={}; DATA.active.forEach(h=>{ const c=cityOf(h.pocket); (t[c]=t[c]||{}); t[c][h.pocket]=(t[c][h.pocket]||0)+1; }); return t; }
+function renderAreas(){
+  const t=areaTree(), q=state.areaSearch.trim().toLowerCase();
+  $('areaClear').style.display = state.pockets.size?'inline':'none';
+  const lab=document.querySelector('#areaTree').previousElementSibling; // not used
+  let html='';
+  Object.keys(t).sort().forEach(city=>{
+    const hoods=Object.keys(t[city]).sort();
+    const multi = hoods.length>1 || hoods[0]!==city;   // has real sub-neighborhoods
+    const total=hoods.reduce((s,p)=>s+t[city][p],0);
+    const matchCity=city.toLowerCase().includes(q);
+    const matchHoods=hoods.filter(p=>p.toLowerCase().includes(q));
+    if(q && !matchCity && !matchHoods.length) return;
+    const selN=hoods.filter(p=>state.pockets.has(p)).length;
+    const cb=selN===0?'':(selN===hoods.length?'on':'part');
+    const exp = state.areaExpanded.has(city) || (q!=='' && matchHoods.length>0 && !matchCity);
+    html+=`<div class="arow" data-city="${city}"><span class="exp" data-exp="${city}">${multi?(exp?'▾':'▸'):''}</span><span class="cb ${cb}" data-pcity="${city}">${cb==='on'?'✓':cb==='part'?'–':''}</span><span class="nm">${city}</span><span class="ct">${total}</span></div>`;
+    if(multi && exp){
+      const show = (q && !matchCity) ? hoods.filter(p=>p.toLowerCase().includes(q)) : hoods;
+      show.forEach(p=>{ const on=state.pockets.has(p);
+        html+=`<div class="arow hood"><span class="exp"></span><span class="cb ${on?'on':''}" data-phood="${p}">${on?'✓':''}</span><span class="nm">${p.replace(' (county)','')}</span><span class="ct">${t[city][p]}</span></div>`;
+      });
+    }
+  });
+  $('areaTree').innerHTML=html||'<div style="font-size:11.5px;color:var(--faint);padding:8px 3px">No match.</div>';
+}
+function setCity(city,on){ const t=areaTree(); Object.keys(t[city]||{}).forEach(p=>on?state.pockets.add(p):state.pockets.delete(p)); }
+function onAreaPick(){ if(state.pockets.size){ state.region=''; } renderAll(); }
 
 function loadFocus(){ try { return new Set(JSON.parse(localStorage.getItem('hs_focus')||'[]')); } catch(e){ return new Set(); } }
 function saveFocus(){ localStorage.setItem('hs_focus', JSON.stringify([...state.focus])); }
@@ -243,10 +294,12 @@ function dealScore(h){
   if (a==null) return g;
   return Math.round(Math.min(g,a)*0.6 + Math.max(g,a)*0.4);
 }
-const avmAgree = h => h.gem_pct!=null && h.vs_est_pct!=null && Math.sign(h.gem_pct)===Math.sign(h.vs_est_pct) && Math.abs(h.gem_pct-h.vs_est_pct)<=18;
+// "confirmed" = both independent models agree this is a DEAL (both discounts ≥3% and close)
+const avmAgree = h => h.gem_pct!=null && h.vs_est_pct!=null && h.gem_pct>=3 && h.vs_est_pct>=3 && Math.abs(h.gem_pct-h.vs_est_pct)<=18;
 
 function passFilters(h, isActive){
   if (state.region === 'Focus') { if (!state.focus.has(focusKey(h))) return false; }
+  else if (state.pockets.size) { if (!state.pockets.has(h.pocket)) return false; }
   else if (state.region && regionOf(h) !== state.region) return false;
   if (state.customOnly && !inZones(h)) return false;
   if (state.targetsOnly && !h.target) return false;
@@ -439,7 +492,7 @@ function renderAll(){
   $('chipPending').classList.toggle('on',state.showPending);
   $('chipLots').classList.toggle('on',state.showLots);
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
-  renderBid(); renderFeed(); renderRailTemp(); renderOH(); renderCharts(); renderMarket(); renderSoldTable(); renderMap();
+  renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderOH(); renderCharts(); renderMarket(); renderSoldTable(); renderMap();
 }
 async function load(){
   const r=await fetch('data.json?_='+Date.now()); DATA=await r.json();
@@ -452,7 +505,14 @@ async function load(){
 $('bedSeg').innerHTML=[['any',0],['3+',3],['4+',4],['5+',5]].map(([l,v])=>`<button data-v="${v}"${v===0?' class="on"':''}>${l}</button>`).join('');
 $('bedSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.minBeds=+b.dataset.v;$('bedSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderAll();});
 $('bidStrip').onclick=e=>{ if(e.target.closest('a'))return; state.bidOpen=!state.bidOpen; renderBid(); };
-document.querySelectorAll('#tabs .tab').forEach(b=>b.onclick=()=>{state.region=b.dataset.r;renderAll();});
+document.querySelectorAll('#tabs .tab').forEach(b=>b.onclick=()=>{state.region=b.dataset.r;state.pockets.clear();renderAll();});
+$('areaTree').onclick=e=>{
+  const exp=e.target.closest('[data-exp]'); if(exp && exp.textContent){ const c=exp.dataset.exp; state.areaExpanded.has(c)?state.areaExpanded.delete(c):state.areaExpanded.add(c); renderAreas(); return; }
+  const cityCb=e.target.closest('[data-pcity]'); if(cityCb){ const c=cityCb.dataset.pcity; const t=areaTree(); const hoods=Object.keys(t[c]||{}); const allOn=hoods.every(p=>state.pockets.has(p)); setCity(c,!allOn); onAreaPick(); return; }
+  const hoodCb=e.target.closest('[data-phood]'); if(hoodCb){ const p=hoodCb.dataset.phood; state.pockets.has(p)?state.pockets.delete(p):state.pockets.add(p); onAreaPick(); return; }
+};
+$('areaSearch').oninput=()=>{ state.areaSearch=$('areaSearch').value; renderAreas(); };
+$('areaClear').onclick=()=>{ state.pockets.clear(); renderAll(); };
 document.querySelectorAll('#tabs .sbtn').forEach(b=>b.onclick=()=>{state.sort=b.dataset.s;renderAll();});
 $('chipTargets').onclick=()=>{state.targetsOnly=!state.targetsOnly;renderAll();};
 $('chipFixer').onclick=()=>{state.fixerOnly=!state.fixerOnly;renderAll();};

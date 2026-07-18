@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="a02ec2af34570db567b00171915173ec">
+<meta name="build" content="830f20a94192ac7efa3d719a9139ef63">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -222,7 +222,7 @@ function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alph
 let DATA=null, MARKET=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
-let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
+let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
 const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
@@ -276,10 +276,6 @@ function loadFocus(){ try { return new Set(JSON.parse(localStorage.getItem('hs_f
 function saveFocus(){ localStorage.setItem('hs_focus', JSON.stringify([...state.focus])); }
 function focusKey(h){ return h.url || addr(h); }
 function toggleFocus(k){ state.focus.has(k)?state.focus.delete(k):state.focus.add(k); saveFocus(); renderAll(); }
-function loadZones(){ try { return JSON.parse(localStorage.getItem('hs_zones')||'[]'); } catch(e){ return []; } }
-function saveZones(){ const zs=[]; drawLayer.eachLayer(l=>zs.push(l.getLatLngs()[0].map(p=>[p.lat,p.lng]))); localStorage.setItem('hs_zones', JSON.stringify(zs)); }
-function zoneRings(){ const zs=[]; if (drawLayer) drawLayer.eachLayer(l=>zs.push(l.getLatLngs()[0])); return zs; }
-function inZones(h){ if(!h.lat) return false; return zoneRings().some(ring=>{ let inside=false; for(let i=0,j=ring.length-1;i<ring.length;j=i++){ const yi=ring[i].lat,xi=ring[i].lng,yj=ring[j].lat,xj=ring[j].lng; if((yi>h.lat)!==(yj>h.lat)&&h.lon<(xj-xi)*(h.lat-yi)/(yj-yi)+xi) inside=!inside; } return inside; }); }
 function monthsAgoISO(n){ const d=new Date(DATA.generated_at); d.setMonth(d.getMonth()-n); return d.toISOString().slice(0,10); }
 const hasUpside = h => (h.opp_flags && h.opp_flags.length) > 0;
 const hasHaz = h => !!(h.fire_zone || h.flood_zone);
@@ -304,7 +300,6 @@ function passFilters(h, isActive){
   if (state.region === 'Focus') { if (!state.focus.has(focusKey(h))) return false; }
   else if (state.pockets.size) { if (!state.pockets.has(h.pocket)) return false; }
   else if (state.region && regionOf(h) !== state.region) return false;
-  if (state.customOnly && !inZones(h)) return false;
   if (state.targetsOnly && !h.target) return false;
   if (h.price < +$('fMin').value || h.price > +$('fPrice').value) return false;
   if (h.type === 'lot') { if (isActive && !state.showLots) return false; }

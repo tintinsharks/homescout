@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="b4ef855a833bcd5098cefef3b3bcb210">
+<meta name="build" content="d396dcde9621290451a12f43bd2cb076">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -175,11 +175,6 @@
     </div>
 
     <div class="feed" id="feed"></div>
-
-    <div class="panel">
-      <h2>📅 Open houses <span class="hint">— upcoming, in scope, best gems first</span></h2>
-      <div class="twrap"><table id="ohTable"></table></div>
-    </div>
 
     <div class="panel">
       <h2>Sold trends <label style="font-family:'Libre Franklin',sans-serif;font-weight:400;font-size:12.5px;color:var(--muted);margin-left:8px">Look back <select id="tRange"><option value="24">2 yr</option><option value="60" selected>5 yr</option><option value="120">10 yr</option></select></label></h2>
@@ -406,16 +401,6 @@ function renderBid(){
   $('bidStrip').innerHTML = html;
 }
 
-function parseOH(s){ const m=String(s).match(/^([A-Za-z]+)-(\d+)-(\d+)/); if(!m) return null; const d=new Date(`${m[1]} ${m[2]}, ${m[3]}`); return isNaN(d)?null:d; }
-function renderOH(){
-  const now=new Date(DATA.generated_at); now.setHours(0,0,0,0);
-  const rows=DATA.active.filter(h=>passFilters(h,true)&&h.open_house).map(h=>({h,d:parseOH(h.open_house)})).filter(x=>x.d&&x.d>=now).sort((a,b)=>(a.d-b.d)||((b.h.gem_pct??-99)-(a.h.gem_pct??-99)));
-  if(!rows.length){ $('ohTable').innerHTML='<tr><td class="empty">No upcoming open houses in scope.</td></tr>'; return; }
-  let html='<tr><th>When</th><th>Address</th><th>Pocket</th><th>Price</th><th>Gem</th><th>SqFt</th></tr>';
-  rows.forEach(({h})=>{ html+=`<tr><td><b>${h.open_house.replace(/-2\d{3}/,'').replace(/-/g,' ')}</b></td><td><a href="${h.url}" target="_blank">${addr(h)}</a></td><td><span class="pocket-tag${h.target?' t':''}">${h.pocket}</span></td><td><b>${fmt$(h.price)}</b></td><td>${h.gem_pct!=null?`<span class="${h.gem_pct>=5?'pos':''}">${h.gem_pct>0?'+':''}${Math.round(h.gem_pct)}%</span>`:'—'}</td><td>${h.sqft?h.sqft.toLocaleString():'—'}</td></tr>`; });
-  $('ohTable').innerHTML=html;
-}
-
 function renderSoldTable(){
   let sort=state.sortS||['sold_date',-1];
   const rows=DATA.sold.filter(h=>passFilters(h,false)).sort((a,b)=>{const x=a[sort[0]]??-Infinity,y=b[sort[0]]??-Infinity;return (x<y?-1:x>y?1:0)*sort[1];}).slice(0,150);
@@ -482,7 +467,7 @@ function renderAll(){
   $('chipPending').classList.toggle('on',state.showPending);
   $('chipLots').classList.toggle('on',state.showLots);
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
-  renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderOH(); renderCharts(); renderMarket(); renderSoldTable();
+  renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderCharts(); renderMarket(); renderSoldTable();
 }
 const BUILD = document.querySelector('meta[name=build]')?.content || 'dev';
 async function checkVersion(){   // reload once if a newer page has deployed (beats stale browser/CDN cache)

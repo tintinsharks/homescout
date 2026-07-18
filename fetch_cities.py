@@ -96,6 +96,7 @@ def row_from(r, pocket, hoods=None, limits=None):
         "sold_date": None,
         "open_house": "",
         "url": s(r.get("property_url")),
+        "photo": s(r.get("primary_photo")),
         "lat": lat,
         "lon": lon,
         "pocket": pocket,

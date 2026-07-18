@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="022894e4311ec1b35abedf40defaf4f6">
+<meta name="build" content="a02ec2af34570db567b00171915173ec">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -79,8 +79,10 @@
   .sbtn { border:1px solid var(--line); background:var(--card); border-radius:8px; padding:6px 11px; font-size:11.5px; font-weight:600; cursor:pointer; color:#6b5e4e; }
   .sbtn.on { background:var(--amber); border-color:var(--amber); color:var(--ink2); }
   .feed { display:flex; flex-direction:column; gap:11px; }
-  .fcard { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:13px 16px 13px 13px; display:flex; gap:14px; align-items:stretch; box-shadow:0 2px 10px rgba(58,42,32,.04); }
-  .spine { width:58px; flex:none; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:8px 4px; }
+  .fcard { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:13px 16px 13px 13px; display:flex; gap:13px; align-items:stretch; box-shadow:0 2px 10px rgba(58,42,32,.04); }
+  .thumb { width:76px; flex:none; border-radius:12px; background:#efe7d8 center/cover no-repeat; display:flex; align-items:center; justify-content:center; font-size:26px; color:#c9bca8; text-decoration:none; align-self:stretch; min-height:76px; }
+  @media (max-width:520px){ .thumb { width:60px; min-height:60px; font-size:20px; } }
+  .spine { width:54px; flex:none; border-radius:12px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; padding:8px 4px; }
   .spine .sv { font-family:'Newsreader',serif; font-size:21px; font-weight:600; font-variant-numeric:tabular-nums; }
   .spine .sl { font-size:8px; font-weight:700; letter-spacing:.06em; opacity:.75; }
   .fbody { flex:1; min-width:0; display:flex; flex-direction:column; gap:7px; justify-content:center; }
@@ -217,9 +219,8 @@ const median = a => { if (!a.length) return null; const s=[...a].sort((x,y)=>x-y
 const addr = h => h.address || (h.mls ? 'MLS ' + h.mls : (h.pocket || 'Listing'));
 const POCKET_COLORS = {'Woodside Plaza':'#c0552f','Selby-Atherwood (county)':'#b45309','Farm Hills':'#0f766e','Emerald Hills (county)':'#7c3aed','Mount Carmel':'#db2777','Canyon':'#ca8a04','Eagle Hill':'#0891b2','Edgewood Park':'#4f46e5','Redwood Oaks':'#65a30d','Roosevelt':'#e11d48','Redwood Shores':'#64748b','Menlo Park':'#059669','West Menlo (county)':'#c026d3','Atherton':'#7c2d12','Woodside':'#78716c','Fremont':'#be123c','Union City':'#a16207'};
 function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alpha ? hex + Math.round(alpha*255).toString(16).padStart(2,'0') : hex; let h=0; for (const ch of String(p)) h=(h*31+ch.charCodeAt(0))>>>0; return alpha?`hsla(${h%360},55%,42%,${alpha})`:`hsl(${h%360},55%,42%)`; }
-const NB_MAP = {'FARMHILL':'Farm Hills','WOODSIDE PLAZA':'Woodside Plaza','MT. CARMEL':'Mount Carmel','EAGLE HILL':'Eagle Hill','EDGEWOOD PARK':'Edgewood Park','CANYON':'Canyon','CENTRAL':'Central','CENTENNIAL':'Centennial','STAMBAUGH - HELLER':'Stambaugh-Heller','REDWOOD OAKS':'Redwood Oaks','PALM':'Palm Park','FRIENDLY ACRES':'Friendly Acres','REDWOOD VILLAGE':'Redwood Village','ROOSEVELT':'Roosevelt','DOWNTOWN':'Downtown','BAIR ISLAND':'Bair Island','REDWOOD SHORES':'Redwood Shores'};
-let DATA=null, MARKET=null, MAP=null, layerActive=null, layerSold=null, hoodLayer=null, drawLayer=null;
-let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null, lastShownPts=[], lastFitSig=null, hazLayer=null, hazLoaded=false;
+let DATA=null, MARKET=null;
+let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
 let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, customOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
 const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc' };
@@ -364,6 +365,7 @@ function renderFeed(){
     const avc = a!=null?` <span class="win" style="color:${a>=3?'#3c7d54':'var(--muted)'}">· ${(a>0?'+':'')+Math.round(a)}% AVM</span>`:'';
     const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
     return `<div class="fcard">
+      <a class="thumb" href="${h.url}" target="_blank"${h.photo?` style="background-image:url('${h.photo.replace(/'/g,'')}')"`:''}>${h.photo?'':'🏡'}</a>
       <div class="spine" style="background:${spineBg};color:${spineC}"><span class="sv">${sv}</span><span class="sl">SCORE</span></div>
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span><span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
@@ -419,14 +421,13 @@ function renderSoldTable(){
 
 function renderCharts(){
   const lookback=+($('tRange')?.value||60); const longSeries=MARKET&&MARKET.pocket_ppsf;
-  const nMonths=(state.customOnly||!longSeries)?Math.min(lookback,24):lookback;
+  const nMonths=!longSeries?Math.min(lookback,24):lookback;
   const months=[]; const now=new Date(DATA.generated_at);
   for(let i=nMonths-1;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push(d.toISOString().slice(0,7)); }
   const longData=p=>months.map(m=>(longSeries[p]&&longSeries[p][m])?longSeries[p][m][0]:null);
-  let series;
-  if(state.customOnly){ series=[{label:'My drawn area',borderColor:'#c0552f',backgroundColor:'#c0552f',spanGaps:true,tension:.25,data:months.map(m=>median(DATA.sold.filter(h=>inZones(h)&&h.sqft>=2000&&h.sold_date&&h.sold_date.startsWith(m)).map(h=>h.ppsf)))}]; }
-  else { const scope=DATA.target_pockets; series=scope.map(p=>({label:p,borderColor:colorFor(p),backgroundColor:colorFor(p),spanGaps:true,tension:.25,pointRadius:nMonths>30?0:2,data:longSeries?longData(p):months.map(m=>median(DATA.sold.filter(h=>h.pocket===p&&h.sqft>=2000&&h.sold_date&&h.sold_date.startsWith(m)).map(h=>h.ppsf)))})); }
-  series.push({label:'All coverage',borderColor:'#a89b86',backgroundColor:'#a89b86',borderDash:[6,4],spanGaps:true,tension:.25,pointRadius:nMonths>30?0:2,data:(longSeries&&!state.customOnly)?longData('All coverage'):months.map(m=>median(DATA.sold.filter(h=>h.sqft>=2000&&h.sold_date&&h.sold_date.startsWith(m)).map(h=>h.ppsf)))});
+  const scope=DATA.target_pockets;
+  let series=scope.map(p=>({label:p,borderColor:colorFor(p),backgroundColor:colorFor(p),spanGaps:true,tension:.25,pointRadius:nMonths>30?0:2,data:longSeries?longData(p):months.map(m=>median(DATA.sold.filter(h=>h.pocket===p&&h.sqft>=2000&&h.sold_date&&h.sold_date.startsWith(m)).map(h=>h.ppsf)))}));
+  series.push({label:'All coverage',borderColor:'#a89b86',backgroundColor:'#a89b86',borderDash:[6,4],spanGaps:true,tension:.25,pointRadius:nMonths>30?0:2,data:longSeries?longData('All coverage'):months.map(m=>median(DATA.sold.filter(h=>h.sqft>=2000&&h.sold_date&&h.sold_date.startsWith(m)).map(h=>h.ppsf)))});
   if(trendChart)trendChart.destroy();
   trendChart=new Chart($('trendChart'),{type:'line',data:{labels:months,datasets:series},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{title:{display:true,text:`Median sold $/sqft by month (${Math.round(nMonths/12)} yr)`},legend:{position:'bottom'}},scales:{y:{ticks:{callback:v=>'$'+v}},x:{ticks:{maxTicksLimit:12}}}}});
   const solds=DATA.sold.filter(h=>passFilters(h,false)); const groups={}; solds.forEach(h=>{(groups[h.pocket]=groups[h.pocket]||[]).push(h);});
@@ -471,9 +472,32 @@ function renderAll(){
   $('chipHaz').classList.toggle('on',state.avoidHaz);
   $('chipPending').classList.toggle('on',state.showPending);
   $('chipLots').classList.toggle('on',state.showLots);
+  document.querySelectorAll('#bedSeg button').forEach(b=>b.classList.toggle('on',+b.dataset.v===state.minBeds));
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
   const ms=+$('fMinScore').value; $('scoreLab').textContent = ms<=-35 ? 'any' : (ms>0?'+':'')+ms+' or better';
+  saveFilters();
   renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderCharts(); renderMarket(); renderSoldTable();
+}
+function saveFilters(){
+  try{ localStorage.setItem('hs_filters', JSON.stringify({
+    region:state.region, sort:state.sort, sortDir:state.sortDir, minBeds:state.minBeds,
+    targetsOnly:state.targetsOnly, fixerOnly:state.fixerOnly, avoidHaz:state.avoidHaz, showPending:state.showPending, showLots:state.showLots,
+    pockets:[...state.pockets], areaExpanded:[...state.areaExpanded],
+    fMin:$('fMin').value, fPrice:$('fPrice').value, fSqft:$('fSqft').value, fYearMin:$('fYearMin').value, fMinScore:$('fMinScore').value
+  })); }catch(e){}
+}
+function restoreFilters(){
+  let f; try{ f=JSON.parse(localStorage.getItem('hs_filters')||'null'); }catch(e){ f=null; }
+  if(!f) return;   // first visit → keep the hardcoded defaults
+  if(f.region!=null) state.region=f.region;
+  if(f.sort) state.sort=f.sort;
+  if(f.sortDir) state.sortDir=f.sortDir;
+  if(f.minBeds!=null) state.minBeds=f.minBeds;
+  ['targetsOnly','fixerOnly','avoidHaz','showPending'].forEach(k=>{ if(f[k]!=null) state[k]=!!f[k]; });
+  if(f.showLots!=null) state.showLots=!!f.showLots;
+  if(Array.isArray(f.pockets)) state.pockets=new Set(f.pockets);
+  if(Array.isArray(f.areaExpanded)) state.areaExpanded=new Set(f.areaExpanded);
+  ['fMin','fPrice','fSqft','fYearMin','fMinScore'].forEach(k=>{ if(f[k]!=null) $(k).value=f[k]; });
 }
 const BUILD = document.querySelector('meta[name=build]')?.content || 'dev';
 async function checkVersion(){   // reload once if a newer page has deployed (beats stale browser/CDN cache)
@@ -516,6 +540,7 @@ $('chipPending').onclick=()=>{state.showPending=!state.showPending;renderAll();}
 $('chipLots').onclick=()=>{state.showLots=!state.showLots;renderAll();};
 ['fMin','fPrice','fSqft','fYearMin','fMinScore'].forEach(id=>$(id).oninput=renderAll);
 $('mktScope').onchange=renderMarket; $('tRange').onchange=renderCharts;
+restoreFilters();
 load();
 setInterval(load, 30*60*1000);
 setTimeout(checkVersion, 8000);          // catch a stale initial load quickly

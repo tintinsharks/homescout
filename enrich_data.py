@@ -85,6 +85,9 @@ def main():
         lsd = r.get("last_sold_date")
         h["last_sold"] = str(lsd)[:10] if lsd is not None and not pd.isna(lsd) else None
         h["last_sold_price"] = to_i(r.get("last_sold_price"))
+        pp = r.get("primary_photo")
+        if pp is not None and not pd.isna(pp) and str(pp).startswith("http"):
+            h["photo"] = str(pp)
         text = "" if pd.isna(r.get("text")) else str(r.get("text"))
         h["remarks"] = text[:500]
         low = text.lower()

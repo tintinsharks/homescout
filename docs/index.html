@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="777f6f660199eb435553ba5a1aba0e69">
+<meta name="build" content="72a62ccd01930f48ead97463ede65cca">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -95,6 +95,7 @@
   .chip.up { background:#f6ead2; color:#8a6d3a; } .chip.fire { background:#f5e0d6; color:#b0472a; }
   .chip.flood { background:#dceaf2; color:#3f6f8a; } .chip.wet { background:#e2e8d8; color:#5f7042; }
   .chip.oh { background:#dce8f5; color:#2a5f9e; } .chip.cut { background:#f6e3cf; color:#9a6a1e; }
+  .chip.newu { background:var(--accent); color:#fff; } .chip.newl { background:#dcf0e2; color:#2f7d4f; }
   .fmeta { display:flex; align-items:baseline; gap:6px 14px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
   .fmeta .spec { font-size:12px; color:#4a3f31; white-space:nowrap; }
   .fmeta .money { margin-left:auto; text-align:right; }
@@ -145,6 +146,7 @@
         <label>BUILT ≥<input type="number" id="fYearMin" placeholder="any" step="1"></label>
       </div>
       <div class="togs">
+        <button class="tog" id="chipNew">🆕 New since last visit</button>
         <button class="tog" id="chipTargets">🎯 Targets only</button>
         <button class="tog" id="chipFixer">🔨 Fixer / expandable only</button>
         <button class="tog" id="chipHaz">🛡️ Hide hazard-flagged</button>
@@ -222,7 +224,7 @@ function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alph
 let DATA=null, MARKET=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
-let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
+let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, newOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
 const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
@@ -276,6 +278,13 @@ function loadFocus(){ try { return new Set(JSON.parse(localStorage.getItem('hs_f
 function saveFocus(){ localStorage.setItem('hs_focus', JSON.stringify([...state.focus])); }
 function focusKey(h){ return h.url || addr(h); }
 function toggleFocus(k){ state.focus.has(k)?state.focus.delete(k):state.focus.add(k); saveFocus(); renderAll(); }
+// "new to you" = a listing key not present on your previous visit (first visit = baseline, flags nothing)
+function listingKey(h){ return h.mls || h.url || addr(h); }
+const HS_FIRST_VISIT = !localStorage.getItem('hs_seen');
+let SEEN_KEYS = new Set(); try{ SEEN_KEYS = new Set(JSON.parse(localStorage.getItem('hs_seen')||'[]')); }catch(e){}
+function isNewToYou(h){ return !HS_FIRST_VISIT && !SEEN_KEYS.has(listingKey(h)); }
+function markSeen(){ try{ localStorage.setItem('hs_seen', JSON.stringify(DATA.active.map(listingKey))); }catch(e){} }
+const justListed = h => h.dom!=null && h.dom<=7;
 function monthsAgoISO(n){ const d=new Date(DATA.generated_at); d.setMonth(d.getMonth()-n); return d.toISOString().slice(0,10); }
 const hasUpside = h => (h.opp_flags && h.opp_flags.length) > 0;
 const hasHaz = h => !!(h.fire_zone || h.flood_zone);
@@ -310,6 +319,7 @@ function passFilters(h, isActive){
   }
   // fixer / hazard / pending / deal-score are active-listing concepts (sold comps aren't enriched)
   if (isActive){
+    if (state.newOnly && !isNewToYou(h)) return false;
     if (state.fixerOnly && !hasUpside(h)) return false;
     if (state.avoidHaz && hasHaz(h)) return false;
     if (!state.showPending && /pending|contingent/i.test(h.status)) return false;
@@ -328,6 +338,8 @@ function chipsFor(h){
   if (h.fire_zone) s+=`<span class="chip fire" title="CalFire ${h.fire_zone}">🔥 ${h.fire_zone==='Very High'?'fire VH':'fire'}</span>`;
   if (h.flood_zone) s+=`<span class="chip flood" title="FEMA ${h.flood_zone}">🌊 flood</span>`;
   if (/Bair Island|Shores/.test(h.pocket||'')) s+='<span class="chip wet">🌿 wetland</span>';
+  if (isNewToYou(h)) s='<span class="chip newu" title="appeared since your last visit">🆕 new to you</span>'+s;
+  if (justListed(h)) s+='<span class="chip newl" title="'+h.dom+' days on market">✨ just listed</span>';
   const cut=priceCut(h); if (cut) s+=`<span class="chip cut">▼ cut ${fmtK(cut)}</span>`;
   if (h.open_house) s+='<span class="chip oh">📅 open</span>';
   return s;
@@ -463,6 +475,10 @@ function renderMarket(){
 function renderAll(){
   document.querySelectorAll('#tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset.r===state.region));
   document.querySelectorAll('#tabs .sbtn').forEach(b=>{ const on=b.dataset.s===state.sort; b.classList.toggle('on',on); b.textContent=b.dataset.s+(on?(state.sortDir==='asc'?' ↑':' ↓'):''); });
+  const nNew=DATA?DATA.active.filter(h=>isNewToYou(h)&&passFilters(h,true)).length:0;
+  $('chipNew').classList.toggle('on',state.newOnly);
+  $('chipNew').textContent = HS_FIRST_VISIT ? '🆕 New since last visit' : `🆕 New since last visit (${nNew})`;
+  $('chipNew').style.opacity = (HS_FIRST_VISIT||nNew===0) ? '.5' : '1';
   $('chipTargets').classList.toggle('on',state.targetsOnly);
   $('chipFixer').classList.toggle('on',state.fixerOnly);
   $('chipHaz').classList.toggle('on',state.avoidHaz);
@@ -512,6 +528,7 @@ async function load(){
   $('updated').textContent=`updated ${ageMin<90?ageMin+' min':Math.round(ageMin/60)+' h'} ago · every 4h`;
   $('genat').textContent='refresh: '+gen.toLocaleString();
   renderAll();
+  if(!window.__seenMarked){ window.__seenMarked=true; markSeen(); }   // baseline this visit once
 }
 $('bedSeg').innerHTML=[['any',0],['3+',3],['4+',4],['5+',5]].map(([l,v])=>`<button data-v="${v}"${v===0?' class="on"':''}>${l}</button>`).join('');
 $('bedSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.minBeds=+b.dataset.v;$('bedSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderAll();});
@@ -529,6 +546,7 @@ document.querySelectorAll('#tabs .sbtn').forEach(b=>b.onclick=()=>{
   else { state.sort=b.dataset.s; state.sortDir=SORT_DEFAULT[b.dataset.s]||'desc'; }
   renderAll();
 });
+$('chipNew').onclick=()=>{state.newOnly=!state.newOnly;renderAll();};
 $('chipTargets').onclick=()=>{state.targetsOnly=!state.targetsOnly;renderAll();};
 $('chipFixer').onclick=()=>{state.fixerOnly=!state.fixerOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};

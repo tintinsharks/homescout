@@ -419,30 +419,8 @@ def main():
         except Exception:
             pass
 
-    # --- price history tracking between runs ---
-    history = {}
-    if HISTORY_FILE.exists():
-        history = json.loads(HISTORY_FILE.read_text())
-    now_iso = today.isoformat()
-    active_ids = set()
-    for home in active:
-        key = home["mls"] or home["address"]
-        active_ids.add(key)
-        entry = history.get(key)
-        if entry is None:
-            # estimate original list date from days-on-market on first sight
-            dom = home["dom"] or 0
-            entry = {"first_seen": (today - timedelta(days=dom)).isoformat(), "prices": []}
-            history[key] = entry
-        if not entry["prices"] or entry["prices"][-1][1] != home["price"]:
-            entry["prices"].append([now_iso, home["price"]])
-        home["first_seen"] = entry["first_seen"]
-        home["price_history"] = entry["prices"]
-    # drop listings gone for a while to keep the file tidy
-    for key in [k for k, v in history.items() if k not in active_ids
-                and v["prices"] and v["prices"][-1][0] < (today - timedelta(days=120)).isoformat()]:
-        del history[key]
-    HISTORY_FILE.write_text(json.dumps(history, indent=1))
+    # NOTE: price-history / first-seen tracking now runs once over the FULL merged
+    # active set (RWC + all HomeHarvest cities) in hazard_tag.py's track_history().
 
     # map overlay for pockets that have no official polygon (e.g. county islands)
     extra_polys = {}

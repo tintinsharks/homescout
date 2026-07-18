@@ -10,11 +10,13 @@ Stdlib only; point-in-polygon reused from fetch_data.
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import fetch_data as fd
 
 HAZ_FILE = fd.DOCS / "hazards.geojson"
 DATA_FILE = fd.DOCS / "data.json"
+HISTORY_FILE = fd.ROOT / "history.json"
 FIRE_RANK = {"Very High": 2, "High": 1}
 FLOOD_RANK = {"VE": 6, "AE": 5, "AH": 4, "AO": 3, "A": 2, "X-0.2%": 1}
 
@@ -64,10 +66,48 @@ def main():
             h["flood_zone"] = flood
             n_flood += 1
 
+    track_history(data)   # first-seen + price cuts across ALL cities (was RWC-only)
     slim(data)   # drop bytes the browser never reads → faster/more reliable Pages builds
     DATA_FILE.write_text(json.dumps(data, separators=(",", ":")))
     print(f"hazard-tagged {len(data['active'])} actives: "
           f"{n_fire} in fire zones, {n_flood} in flood zones")
+
+
+def track_history(data):
+    """Between-run first-seen + price history for EVERY active listing (all cities),
+    so 🆕 just-listed and ▼ price-cut work everywhere, not just the Redfin core."""
+    today = datetime.now(timezone.utc).date()
+    today_iso = today.isoformat()
+    try:
+        hist = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else {}
+    except Exception:
+        hist = {}
+    seen, n_cut, n_new = set(), 0, 0
+    week_ago = (today - timedelta(days=7)).isoformat()
+    for h in data["active"]:
+        key = h.get("mls") or h.get("address")   # same scheme as before → continuity
+        if not key:
+            continue
+        seen.add(key)
+        e = hist.get(key)
+        if e is None:
+            dom = h.get("dom") or 0
+            e = {"first_seen": (today - timedelta(days=min(dom, 120))).isoformat(), "prices": []}
+            hist[key] = e
+        if not e["prices"] or e["prices"][-1][1] != h["price"]:
+            e["prices"].append([today_iso, h["price"]])
+        h["first_seen"] = e["first_seen"]
+        h["price_history"] = e["prices"]
+        if max(p[1] for p in e["prices"]) > h["price"]:
+            n_cut += 1
+        if e["first_seen"] >= week_ago:
+            n_new += 1
+    cutoff = (today - timedelta(days=120)).isoformat()
+    for k in [k for k, v in hist.items()
+              if k not in seen and v.get("prices") and v["prices"][-1][0] < cutoff]:
+        del hist[k]
+    HISTORY_FILE.write_text(json.dumps(hist, separators=(",", ":")))
+    print(f"history: {n_cut} price cuts, {n_new} first-seen ≤7d, {len(hist)} tracked")
 
 
 # fields the frontend never reads off a SOLD row (kept on actives)

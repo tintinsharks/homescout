@@ -209,6 +209,7 @@
 if (window.Chart) { Chart.defaults.font.family = "'Libre Franklin',sans-serif"; Chart.defaults.color = '#8a7d6d'; }
 const $ = id => document.getElementById(id);
 const fmt$ = n => n == null ? '—' : '$' + n.toLocaleString();
+const addr = h => h.address || (h.mls ? 'MLS ' + h.mls : (h.pocket || 'Listing'));
 const fmtK = n => n >= 1e6 ? '$' + (n/1e6).toFixed(2) + 'M' : '$' + Math.round(n/1e3) + 'K';
 const EAST_BAY = /Fremont|Union City|Newark|Hayward/i;
 const regionOf = h => EAST_BAY.test(h.pocket || '') ? 'East Bay' : 'Peninsula';
@@ -415,7 +416,7 @@ function renderOH() {
   let html = '<tr><th>When</th><th>Address</th><th>Pocket</th><th>Price</th><th>Gem</th><th>AVM Δ</th><th>Env</th><th>SqFt</th></tr>';
   rows.forEach(({ h }) => {
     html += `<tr><td><b>${h.open_house.replace(/-2\d{3}/, '').replace(/-/g, ' ')}</b></td>
-      <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}</td>
+      <td><a href="${h.url}" target="_blank">${addr(h)}</a>${badges(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
       <td>${gemCell(h)}</td><td>${avmCell(h)}</td><td>${envCell(h)}</td><td>${h.sqft ? h.sqft.toLocaleString() : '—'}</td></tr>`;
   });
@@ -441,7 +442,7 @@ function renderActive() {
   rows.forEach((h, i) => {
     html += `<tr>
       <td>${starCell(h)}</td>
-      <td><a href="${h.url}" target="_blank">${h.address}</a>${badges(h)}</td>
+      <td><a href="${h.url}" target="_blank">${addr(h)}</a>${badges(h)}</td>
       <td>${pocketTag(h.pocket, h.target)}</td>
       <td><b>${fmt$(h.price)}</b></td>
       <td title="${h.n_comps ? h.n_comps + ' comps' : ''}">${h.expected_price ? fmtK(h.expected_price) : '—'}</td>
@@ -463,7 +464,7 @@ function renderDeals() {
   if (!rows.length) { $('dealTable').innerHTML = '<tr><td class="empty">No listings priced meaningfully below comp value right now.</td></tr>'; return; }
   let html = '<tr><th>Address</th><th>Price</th><th>Gem</th><th>Env</th></tr>';
   rows.forEach(h => {
-    html += `<tr><td><a href="${h.url}" target="_blank">${h.address}</a><br><span style="font-size:11px;color:var(--muted)">${pocketTag(h.pocket, h.target)} · ${h.sqft ? h.sqft.toLocaleString() : '?'} sf</span></td>
+    html += `<tr><td><a href="${h.url}" target="_blank">${addr(h)}</a><br><span style="font-size:11px;color:var(--muted)">${pocketTag(h.pocket, h.target)} · ${h.sqft ? h.sqft.toLocaleString() : '?'} sf</span></td>
       <td><b>${fmt$(h.price)}</b><br><span style="font-size:11px;color:var(--muted)">comp ${fmtK(h.expected_price)}</span></td>
       <td class="pos"><b>+${Math.round(h.gem_pct)}%</b></td><td>${envCell(h)}</td></tr>`;
   });
@@ -485,7 +486,7 @@ function renderSoldTable() {
   let html = th(cols, 'S', state.sortS);
   rows.forEach(h => {
     html += `<tr><td>${h.sold_date}</td>
-      <td><a href="${h.url}" target="_blank">${h.address}</a></td>
+      <td><a href="${h.url}" target="_blank">${addr(h)}</a></td>
       <td>${pocketTag(h.pocket, h.target)}</td><td><b>${fmt$(h.price)}</b></td>
       <td>${vsListCell(h)}</td><td title="days on market">${h.dom ?? '—'}</td>
       <td>${h.beds ?? '—'}</td><td>${h.baths ?? '—'}</td>
@@ -510,7 +511,7 @@ function renderFocus() {
         <span class="pocket-tag${h.target ? ' t' : ''}">${h.pocket}</span>
         <span class="star on" data-k="${encodeURIComponent(focusKey(h))}" title="remove">★</span>
       </div>
-      <a href="${h.url}" target="_blank" style="display:block;font-weight:600;margin-top:8px">${h.address}</a>
+      <a href="${h.url}" target="_blank" style="display:block;font-weight:600;margin-top:8px">${addr(h)}</a>
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;padding-top:9px;border-top:1px solid var(--line2)">
         <div><b style="font-size:15px">${fmt$(h.price)}</b><div style="font-size:10.5px;color:var(--muted)">${h.beds ?? '?'}bd · ${h.sqft ? h.sqft.toLocaleString() : '?'} sf${h.expected_price ? ' · comp ' + fmtK(h.expected_price) : ''}</div></div>
         <div style="text-align:right">${h.gem_pct != null ? `<span class="${h.gem_pct >= 5 ? 'pos' : ''}">${h.gem_pct > 0 ? '+' : ''}${Math.round(h.gem_pct)}%</span>` : ''}<div style="margin-top:3px">${envCell(h)}</div></div>
@@ -627,7 +628,7 @@ function renderMarket() {
 /* ---------- map ---------- */
 function popup(h, sold) {
   const gem = (!sold && h.gem_pct != null) ? `<br>Comp value ${fmtK(h.expected_price)} → <b class="${h.gem_pct >= 5 ? 'pos' : ''}">${h.gem_pct > 0 ? '+' : ''}${Math.round(h.gem_pct)}% gem</b>` : '';
-  return `<b>${h.address}</b><br>${pocketTag(h.pocket, h.target)}<br>
+  return `<b>${addr(h)}</b><br>${pocketTag(h.pocket, h.target)}<br>
     ${fmt$(h.price)} · ${h.beds ?? '?'}bd/${h.baths ?? '?'}ba · ${h.sqft ? h.sqft.toLocaleString() : '?'} sqft · ${h.ppsf ? '$' + h.ppsf + '/sqft' : ''}
     ${sold ? `<br>Sold ${h.sold_date}` : `<br>${h.status}${h.dom != null ? ' · ' + h.dom + ' DOM' : ''}`}${gem}
     <br><a href="${h.url}" target="_blank">View on Redfin →</a>`;

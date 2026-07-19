@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="bb0afd8f64ff488e26006bc192429c8c">
+<meta name="build" content="26650f98835f8b045764431cc939e516">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -89,7 +89,10 @@
   .fhead { display:flex; align-items:baseline; gap:9px; min-width:0; }
   .fhead .addr { font-size:16px; font-weight:600; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 1 auto; }
   .fhead .pk { font-size:11.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
-  .fhead .ppsf { font-size:14px; font-weight:700; color:var(--accent); white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; }
+  .fhead .ppsf { font-size:14px; font-weight:700; color:var(--accent); white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; display:inline-block; text-align:right; line-height:1.2; }
+  .fhead .ppsf .u { font-weight:600; font-size:11px; }
+  .fhead .ppsf .cmp { display:block; font-size:10px; font-weight:700; letter-spacing:.01em; }
+  .fhead .ppsf .cmp.pos { color:var(--new); } .fhead .ppsf .cmp.neg { color:var(--bad); } .fhead .ppsf .cmp.mut { color:var(--muted); }
   .fhead .st { width:8px; height:8px; border-radius:50%; flex:none; }
   .chips { display:flex; flex-wrap:wrap; gap:5px; }
   .chip { font-size:10.5px; font-weight:600; border-radius:6px; padding:2px 7px; white-space:nowrap; }
@@ -346,6 +349,16 @@ function chipsFor(h){
   return s;
 }
 function regionAvgS2L(region){ const c=monthsAgoISO(12); const r=DATA.sold.filter(h=>regionOf(h)===region && h.s2l && h.sold_date>=c).map(h=>h.s2l); return r.length?median(r):100; }
+// median $/sqft per pocket from the last 12 mo of sold comps (≥4 sales); memoized
+let _pocketPpsf=null;
+function pocketPpsfMap(){
+  if(_pocketPpsf) return _pocketPpsf;
+  const cut=monthsAgoISO(12), by={};
+  DATA.sold.forEach(h=>{ if(h.ppsf && h.sold_date>=cut) (by[h.pocket]=by[h.pocket]||[]).push(h.ppsf); });
+  _pocketPpsf={};
+  for(const p in by) if(by[p].length>=4) _pocketPpsf[p]=Math.round(median(by[p]));
+  return _pocketPpsf;
+}
 
 function renderFeed(){
   const rows = DATA.active.filter(h=>passFilters(h,true));
@@ -373,11 +386,18 @@ function renderFeed(){
     const avc = a!=null?` <span class="win" style="color:${a>=3?'#3c7d54':'var(--muted)'}">· ${(a>0?'+':'')+Math.round(a)}% AVM</span>`:'';
     const domc = h.dom!=null?` <span class="sm">· ${h.dom} DOM</span>`:'';
     const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
+    const pm=pocketPpsfMap(); const bench = pm[h.pocket] || (h.expected_price&&h.sqft?Math.round(h.expected_price/h.sqft):null);
+    const benchSrc = pm[h.pocket] ? 'area' : 'comps';
+    let ppsfHtml='';
+    if(h.ppsf){ ppsfHtml=`<span class="ppsf">$${h.ppsf.toLocaleString()}<span class="u">/sqft</span>`;
+      if(bench){ const dpc=Math.round((h.ppsf-bench)/bench*100); const cls=dpc<=-2?'pos':dpc>=2?'neg':'mut';
+        ppsfHtml+=`<span class="cmp ${cls}" title="${benchSrc==='area'?'neighborhood':'nearby comp'} median $${bench.toLocaleString()}/sqft">${dpc<0?'▼':dpc>0?'▲':''}${Math.abs(dpc)}% vs ${benchSrc}</span>`; }
+      ppsfHtml+=`</span>`; }
     return `<div class="fcard">
       <a class="thumb" href="${h.url}" target="_blank"${h.photo?` style="background-image:url('${h.photo.replace(/'/g,'')}')"`:''}>${h.photo?'':'🏡'}</a>
       <div class="spine" style="background:${spineBg};color:${spineC}"><span class="sv">${sv}</span><span class="sl">SCORE</span></div>
       <div class="fbody">
-        <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${h.ppsf?`<span class="ppsf">$${h.ppsf.toLocaleString()}/sqft</span>`:''}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
+        <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${ppsfHtml}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
         <div class="chips">${chipsFor(h)}${agree}</div>
         <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}${domc}</span></div>
       </div>
@@ -523,7 +543,7 @@ async function checkVersion(){   // reload once if a newer page has deployed (be
   }catch(e){}
 }
 async function load(){
-  const r=await fetch('data.json?_='+Date.now()); DATA=await r.json();
+  const r=await fetch('data.json?_='+Date.now()); DATA=await r.json(); _pocketPpsf=null;
   try{ MARKET=await (await fetch('market.json?_='+Date.now())).json(); }catch(e){ MARKET=null; }
   const gen=new Date(DATA.generated_at); const ageMin=Math.round((Date.now()-gen)/60000);
   $('updated').textContent=`updated ${ageMin<90?ageMin+' min':Math.round(ageMin/60)+' h'} ago · every 4h`;

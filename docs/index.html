@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="db6c2020ba95df0865d3c77624130005">
+<meta name="build" content="cf7bc3455575dc4cde9249497e2d4390">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -100,6 +100,7 @@
   .chip.flood { background:#dceaf2; color:#3f6f8a; } .chip.wet { background:#e2e8d8; color:#5f7042; }
   .chip.oh { background:#dce8f5; color:#2a5f9e; } .chip.cut { background:#f6e3cf; color:#9a6a1e; }
   .chip.newu { background:var(--accent); color:#fff; } .chip.newl { background:#dcf0e2; color:#2f7d4f; }
+  .chip.lay-c { background:#e7ded1; color:#7a5b34; } .chip.lay-i { background:#efe9df; color:#9a8a70; } .chip.lay-o { background:#e4ece4; color:#5f7a5f; }
   .fmeta { display:flex; align-items:baseline; gap:6px 14px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
   .fmeta .spec { font-size:12px; color:#4a3f31; white-space:nowrap; }
   .fmeta .money { margin-left:auto; text-align:right; }
@@ -171,6 +172,7 @@
         <button class="tog" id="chipNew">🆕 New since last visit</button>
         <button class="tog" id="chipTargets">🎯 Targets only</button>
         <button class="tog" id="chipFixer">🔨 Fixer / expandable only</button>
+        <button class="tog" id="chipOpen">🔓 Open-up candidates</button>
         <button class="tog" id="chipHaz">🛡️ Hide hazard-flagged</button>
         <button class="tog" id="chipPending">Show pending</button>
         <button class="tog" id="chipLots">🌲 Include lots</button>
@@ -248,7 +250,7 @@ function colorFor(p, alpha) { const hex = POCKET_COLORS[p]; if (hex) return alph
 let DATA=null, MARKET=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
-let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, newOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
+let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, openOnly:false, avoidHaz:false, showPending:false, showLots:true, newOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
 const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Reno margin':'desc', 'Price':'asc', 'Days listed':'asc', '$/sqft':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
@@ -339,7 +341,7 @@ function passFilters(h, isActive){
   else {
     // reno candidates are small-by-design (you buy sqft to add) — the fixer
     // toggle exempts them from the min-sqft floor so they actually surface
-    if (h.sqft != null && h.sqft < +$('fSqft').value && !(isActive && state.fixerOnly && h.reno)) return false;
+    if (h.sqft != null && h.sqft < +$('fSqft').value && !(isActive && ((state.fixerOnly && h.reno) || (state.openOnly && pfIsOpenable(h))))) return false;
     if (state.minBeds && (h.beds||0) < state.minBeds) return false;
     const ymin=+$('fYearMin').value; if (h.year!=null && ymin && h.year<ymin) return false;
   }
@@ -347,6 +349,7 @@ function passFilters(h, isActive){
   if (isActive){
     if (state.newOnly && !isNewToYou(h)) return false;
     if (state.fixerOnly && !hasUpside(h)) return false;
+    if (state.openOnly && !pfIsOpenable(h)) return false;
     if (state.avoidHaz && hasHaz(h)) return false;
     if (!state.showPending && /pending|contingent/i.test(h.status)) return false;
     const ms=+$('fMinScore').value; if (ms>-35){ const s=dealScore(h); if(s==null||s<ms) return false; }
@@ -355,6 +358,22 @@ function passFilters(h, isActive){
 }
 state.minBeds = 0;
 
+// --- layout signal from MLS remarks: is this an open-concept reno play? -------
+// OPEN = flow already exists (little open-up upside). CLOSED = compartmentalized
+// (the "open it up" opportunity). No signal + pre-1970 build = likely-closed.
+const PF_OPEN_RE=/open[- ]?concept|open[- ]?floor ?plan|great ?room|open kitchen|open living|kitchen (?:opens?|flow\w*) (?:to|into|onto|seamlessly)|flow\w* (?:to|into|onto|seamlessly|effortlessly)|seamless\w*|kitchen[/ ]family (?:room )?combin|family room combined|combined (?:kitchen|living|family)|indoor[/-]?outdoor (?:flow|living)|open[- ]?plan|entertainer'?s? (?:dream|layout|flow)/i;
+const PF_CLOSED_RE=/formal living|formal dining|separate family|separate living|galley kitchen|traditional (?:floor ?plan|layout|home)|defined (?:rooms|spaces|living)|distinct (?:living|rooms|spaces)|classic (?:layout|floor ?plan)|compartmentaliz\w*|segmented|eat-in kitchen|closed[- ]?off|cozy (?:living|family|separate)|dedicated (?:formal|dining|living)/i;
+function pfLayout(h){
+  const r=h.remarks||'', op=PF_OPEN_RE.test(r), cl=PF_CLOSED_RE.test(r);
+  if(op&&!cl) return 'open';
+  if(cl&&!op) return 'closed';
+  if(op&&cl)  return 'partial';
+  if((h.year||2000)<1970) return 'likely-closed';
+  return 'unknown';
+}
+const PF_OPENABLE={closed:1,'likely-closed':1,partial:1};
+function pfIsOpenable(h){ return h.type!=='lot' && !!PF_OPENABLE[pfLayout(h)]; }
+
 function chipsFor(h){
   let s=''; const opp=(h.opp_flags||[]).map(x=>x.toUpperCase());
   const has=re=>opp.some(k=>re.test(k));
@@ -362,6 +381,11 @@ function chipsFor(h){
   if (has(/EXPAND|POTENTIAL|BRING/)) s+='<span class="chip up">↔️ expand</span>';
   if (h.reno) s+='<span class="chip up" title="reno candidate '+h.reno_score+'/5: fixer signals + pre-1975 + 6000+ lot + priced under renovated $/sqft'+(h.reno_bench?' (bench $'+h.reno_bench+'/sqft)':'')+'">🔨 reno '+h.reno_score+'/5</span>';
   else if (has(/FIXER|TLC|AS.?IS|ORIGINAL|COSMETIC|CONTRACTOR|NEEDS|SWEAT|PROBATE|ESTATE|TRUST/)) s+='<span class="chip up">🔨 fixer</span>';
+  const lay=pfLayout(h);
+  if(lay==='open') s+='<span class="chip lay-o" title="MLS describes an open/flowing layout — the open-concept work is already done">◻ open</span>';
+  else if(lay==='closed') s+='<span class="chip lay-c" title="MLS names formal/compartmentalized rooms — open-concept renovation opportunity (explicit)">🔓 open-up</span>';
+  else if(lay==='partial') s+='<span class="chip lay-c" title="partly open (e.g. open kitchen) but keeps formal living/dining — room to open up further">🔓 open-up·partial</span>';
+  else if(lay==='likely-closed') s+='<span class="chip lay-i" title="pre-1970 build, no open-layout language in the listing — likely a compartmentalized original layout (inferred; confirm on tour)">🔓 open-up?</span>';
   if (h.fire_zone) s+=`<span class="chip fire" title="CalFire ${h.fire_zone}">🔥 ${h.fire_zone==='Very High'?'fire VH':'fire'}</span>`;
   if (h.flood_zone) s+=`<span class="chip flood" title="FEMA ${h.flood_zone}">🌊 flood</span>`;
   if (/Bair Island|Shores/.test(h.pocket||'')) s+='<span class="chip wet">🌿 wetland</span>';
@@ -692,6 +716,7 @@ function renderAll(){
   $('chipNew').style.opacity = (HS_FIRST_VISIT||nNew===0) ? '.5' : '1';
   $('chipTargets').classList.toggle('on',state.targetsOnly);
   $('chipFixer').classList.toggle('on',state.fixerOnly);
+  $('chipOpen').classList.toggle('on',state.openOnly);
   $('chipHaz').classList.toggle('on',state.avoidHaz);
   $('chipPending').classList.toggle('on',state.showPending);
   $('chipLots').classList.toggle('on',state.showLots);
@@ -704,7 +729,7 @@ function renderAll(){
 function saveFilters(){
   try{ localStorage.setItem('hs_filters', JSON.stringify({
     region:state.region, sort:state.sort, sortDir:state.sortDir, minBeds:state.minBeds,
-    targetsOnly:state.targetsOnly, fixerOnly:state.fixerOnly, avoidHaz:state.avoidHaz, showPending:state.showPending, showLots:state.showLots,
+    targetsOnly:state.targetsOnly, fixerOnly:state.fixerOnly, openOnly:state.openOnly, avoidHaz:state.avoidHaz, showPending:state.showPending, showLots:state.showLots,
     pockets:[...state.pockets], areaExpanded:[...state.areaExpanded],
     fMin:$('fMin').value, fPrice:$('fPrice').value, fSqft:$('fSqft').value, fYearMin:$('fYearMin').value, fMinScore:$('fMinScore').value
   })); }catch(e){}
@@ -716,7 +741,7 @@ function restoreFilters(){
   if(f.sort) state.sort=f.sort;
   if(f.sortDir) state.sortDir=f.sortDir;
   if(f.minBeds!=null) state.minBeds=f.minBeds;
-  ['targetsOnly','fixerOnly','avoidHaz','showPending'].forEach(k=>{ if(f[k]!=null) state[k]=!!f[k]; });
+  ['targetsOnly','fixerOnly','openOnly','avoidHaz','showPending'].forEach(k=>{ if(f[k]!=null) state[k]=!!f[k]; });
   if(f.showLots!=null) state.showLots=!!f.showLots;
   if(Array.isArray(f.pockets)) state.pockets=new Set(f.pockets);
   if(Array.isArray(f.areaExpanded)) state.areaExpanded=new Set(f.areaExpanded);
@@ -760,6 +785,7 @@ document.querySelectorAll('#tabs .sbtn').forEach(b=>b.onclick=()=>{
 $('chipNew').onclick=()=>{state.newOnly=!state.newOnly;renderAll();};
 $('chipTargets').onclick=()=>{state.targetsOnly=!state.targetsOnly;renderAll();};
 $('chipFixer').onclick=()=>{state.fixerOnly=!state.fixerOnly;renderAll();};
+$('chipOpen').onclick=()=>{state.openOnly=!state.openOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};
 $('chipPending').onclick=()=>{state.showPending=!state.showPending;renderAll();};
 $('chipLots').onclick=()=>{state.showLots=!state.showLots;renderAll();};

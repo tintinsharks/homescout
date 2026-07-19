@@ -142,7 +142,7 @@ def send_reno_alerts(data, hist):
         return
     if not url:
         return
-    lines = []
+    pending = []
     for h in data["active"]:
         if not h.get("reno") or h.get("city") not in RENO_ALERT_CITIES:
             continue
@@ -150,6 +150,14 @@ def send_reno_alerts(data, hist):
         e = hist.get(key)
         if e is None or e.get("reno_alerted"):
             continue
+        pending.append((h, e))
+    if not pending:
+        return
+    # Discord post stays digestible at 8; the rest alert on later runs (only
+    # posted candidates get their reno_alerted flag set).
+    pending.sort(key=lambda x: (-x[0]["reno_score"], -(x[0].get("gem_pct") or 0)))
+    lines = []
+    for h, e in pending[:8]:
         e["reno_alerted"] = True
         gem = " · gem {:+.0f}%".format(h["gem_pct"]) if h.get("gem_pct") is not None else ""
         bench = " · reno bench ${}/sqft".format(h["reno_bench"]) if h.get("reno_bench") else ""
@@ -158,9 +166,7 @@ def send_reno_alerts(data, hist):
                          h["address"], h["pocket"], h["price"], h.get("sqft") or 0,
                          h.get("lot") or 0, h.get("year") or "?",
                          h["reno_score"], gem, bench, h["url"]))
-    if not lines:
-        return
-    body = json.dumps({"content": "🏡 **HomeScout reno radar**\n" + "\n\n".join(lines[:8])}).encode()
+    body = json.dumps({"content": "🏡 **HomeScout reno radar**\n" + "\n\n".join(lines)}).encode()
     try:
         req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=20)

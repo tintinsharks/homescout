@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="d93cc511bfe397c6011437b78ae4a419">
+<meta name="build" content="20a172f4ee7bb856488b830d35b65ba2">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -110,7 +110,8 @@
   .pfbtn { font-size:10.5px; font-weight:600; border-radius:6px; padding:2px 7px; white-space:nowrap; background:#ece4f2; color:#6a4a8a; border:0; cursor:pointer; font-family:inherit; }
   .pfbtn.on { background:#6a4a8a; color:#fff; }
   .pf { margin-top:4px; border-top:1px dashed var(--line); padding-top:9px; display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:7px; font-size:11.5px; }
-  .pf label { display:flex; flex-direction:column; gap:3px; color:var(--faint); font-size:9px; font-weight:700; letter-spacing:.04em; min-width:0; }
+  .pf label { display:flex; flex-direction:column; gap:3px; color:var(--faint); font-size:9px; font-weight:700; letter-spacing:.04em; min-width:0; cursor:help; }
+  .pf .out span { cursor:help; }
   .pf input { border:1px solid var(--line); border-radius:7px; padding:4px 6px; font-size:12.5px; font-family:inherit; width:100%; background:#fff; color:var(--ink); font-variant-numeric:tabular-nums; }
   .pf .out { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:5px 18px; align-items:baseline; font-variant-numeric:tabular-nums; font-size:11px; color:var(--muted); }
   .pf .out b { font-family:'Newsreader',serif; font-size:16px; font-weight:600; color:var(--ink); }
@@ -381,7 +382,16 @@ function pfPanel(h){
   const target=Math.max(2200, Math.round(sqft*1.4/50)*50);
   const vppsf=h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):'');
   const carry=h.price?Math.round(h.price*0.065/12/100)*100:'';
-  const inp=(k,lab,v)=>`<label>${lab}<input name="${k}" type="number" value="${v}"></label>`;
+  const PF_TIPS={
+    buy:'Purchase price. Defaults to asking — set to your expected winning bid (target pockets have cleared ~102% of ask; sitting listings may go under).',
+    target:'Finished size after renovation. Existing sqft gets the remodel rate; every sqft above it is priced as new addition. Check FAR / lot-coverage limits before pushing this — RWC caps how big you can go on a given lot.',
+    remodel:'Cost per sqft to redo the EXISTING footprint. Peninsula 2026: ~$300 cosmetic-heavy refresh → ~$500 down-to-studs with new systems.',
+    addition:'Cost per NEW sqft added (foundation, framing, roof, everything). Peninsula 2026: ~$600–900; hillside lots and second stories run the high end.',
+    cont:'Surprise buffer applied to the whole build. 15% is the floor; use 20%+ on pre-1960 homes (knob-and-tube, galvanized plumbing, foundation unknowns) or anything unpermitted.',
+    months:'Design + permits + construction. Realistic: 12–18 months in RWC city; county parcels (Emerald Hills, Selby) permit slower. Big additions trend longer.',
+    carry:'Monthly holding cost while you build — financing interest, property tax, insurance, utilities. Default ≈ 6.5%/yr interest on buy ÷ 12; zero it if paying cash and ignoring opportunity cost.',
+    vppsf:'What renovated product resells for per sqft here. Default = the pocket’s top-quartile sold $/sqft (renovated-product proxy), else 115% of pocket median. Sanity-check against 2-3 actual remodeled comps before trusting a margin.'};
+  const inp=(k,lab,v)=>`<label title="${PF_TIPS[k]}">${lab} ⓘ<input name="${k}" type="number" value="${v}" title="${PF_TIPS[k]}"></label>`;
   return `<div class="pf" data-sqft="${sqft}">
     ${inp('buy','BUY $',h.price||'')}${inp('target','TARGET SQFT',target)}${inp('remodel','REMODEL $/SF',a.remodel)}${inp('addition','ADDITION $/SF',a.addition)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('vppsf','RENOV. $/SF',vppsf)}
     <div class="out"></div>
@@ -396,11 +406,11 @@ function pfRecalc(p){
   const carry=v.months*v.carry, allin=v.buy+build+carry, val=v.target*v.vppsf, mg=val-allin;
   const pct=allin?mg/allin*100:0, c=pct>=10?'#3c7d54':pct>=0?'#a3752a':'#b0472a';
   p.querySelector('.out').innerHTML =
-    `<span>build<br><b>${fmtK(Math.round(build))}</b></span>`+
-    `<span>${add?`(+${add.toLocaleString()} sf added) `:''}carry<br><b>${fmtK(carry)}</b></span>`+
-    `<span>all-in<br><b>${fmtK(Math.round(allin))}</b></span>`+
-    `<span>renov. value<br><b>${fmtK(Math.round(val))}</b></span>`+
-    `<span class="mg">margin<br><b style="color:${c}">${mg<0?'−':''}${fmtK(Math.abs(Math.round(mg)))} (${pct>0?'+':''}${Math.round(pct)}%)</b></span>`;
+    `<span title="construction total: ${keep.toLocaleString()} sf remodel × $${v.remodel}/sf${add?` + ${add.toLocaleString()} sf addition × $${v.addition}/sf`:''}, × ${100+v.cont}% with contingency">build<br><b>${fmtK(Math.round(build))}</b></span>`+
+    `<span title="holding cost: ${v.months} months × $${v.carry.toLocaleString()}/mo">${add?`(+${add.toLocaleString()} sf added) `:''}carry<br><b>${fmtK(carry)}</b></span>`+
+    `<span title="buy + build + carry — your total cash into the project">all-in<br><b>${fmtK(Math.round(allin))}</b></span>`+
+    `<span title="exit value: ${v.target.toLocaleString()} sf × $${v.vppsf.toLocaleString()}/sf renovated">renov. value<br><b>${fmtK(Math.round(val))}</b></span>`+
+    `<span class="mg" title="renovated value − all-in. Aim ≥10-15% to absorb what the pro-forma can't see; near zero means you're working for free">margin<br><b style="color:${c}">${mg<0?'−':''}${fmtK(Math.abs(Math.round(mg)))} (${pct>0?'+':''}${Math.round(pct)}%)</b></span>`;
 }
 state.proOpen = new Set();
 

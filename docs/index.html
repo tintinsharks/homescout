@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="51b363caceb3b0fcfba9979e0433a5c7">
+<meta name="build" content="5030353fb3bb855734ed688acbaefe7e">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -415,24 +415,17 @@ function pfVerdict(h){
 }
 
 function chipsFor(h){
-  let s=''; const opp=(h.opp_flags||[]).map(x=>x.toUpperCase());
-  const has=re=>opp.some(k=>re.test(k));
-  if (has(/ADU|IN.?LAW/)) s+='<span class="chip up">🏠 ADU</span>';
-  if (has(/EXPAND|POTENTIAL|BRING/)) s+='<span class="chip up">↔️ expand</span>';
-  if (h.reno) s+='<span class="chip up" title="reno candidate '+h.reno_score+'/5: fixer signals + pre-1975 + 6000+ lot + priced under renovated $/sqft'+(h.reno_bench?' (bench $'+h.reno_bench+'/sqft)':'')+'">🔨 reno '+h.reno_score+'/5</span>';
-  else if (has(/FIXER|TLC|AS.?IS|ORIGINAL|COSMETIC|CONTRACTOR|NEEDS|SWEAT|PROBATE|ESTATE|TRUST/)) s+='<span class="chip up">🔨 fixer</span>';
-  const lay=pfLayout(h);
-  if(lay==='open') s+='<span class="chip lay-o" title="MLS describes an open/flowing layout — the open-concept work is already done">◻ open</span>';
-  else if(lay==='closed') s+='<span class="chip lay-c" title="MLS names formal/compartmentalized rooms — open-concept renovation opportunity (explicit)">🔓 open-up</span>';
-  else if(lay==='partial') s+='<span class="chip lay-c" title="partly open (e.g. open kitchen) but keeps formal living/dining — room to open up further">🔓 open-up·partial</span>';
-  else if(lay==='likely-closed') s+='<span class="chip lay-i" title="pre-1970 build, no open-layout language in the listing — likely a compartmentalized original layout (inferred; confirm on tour)">🔓 open-up?</span>';
-  if (h.fire_zone) s+=`<span class="chip fire" title="CalFire ${h.fire_zone}">🔥 ${h.fire_zone==='Very High'?'fire VH':'fire'}</span>`;
-  if (h.flood_zone) s+=`<span class="chip flood" title="FEMA ${h.flood_zone}">🌊 flood</span>`;
+  // Thinned: the verdict line already carries the reno story (open-up / dated /
+  // updated), so only signals it CAN'T convey stay here — hazards, seller
+  // motivation, and what's actionable now. Reno/layout/fixer chips removed;
+  // the 🔨 Fixer and 🔓 Open-up FILTERS still work (they read h.reno/pfLayout).
+  let s='';
+  if (h.fire_zone) s+=`<span class="chip fire" title="CalFire ${h.fire_zone} fire zone — check insurance cost/availability">🔥 ${h.fire_zone==='Very High'?'fire VH':'fire'}</span>`;
+  if (h.flood_zone) s+=`<span class="chip flood" title="FEMA ${h.flood_zone} flood zone">🌊 flood</span>`;
   if (/Bair Island|Shores/.test(h.pocket||'')) s+='<span class="chip wet">🌿 wetland</span>';
-  if (isNewToYou(h)) s='<span class="chip newu" title="appeared since your last visit">🆕 new to you</span>'+s;
-  if (justListed(h)) s+='<span class="chip newl" title="'+h.dom+' days on market">✨ just listed</span>';
-  const cut=priceCut(h); if (cut) s+=`<span class="chip cut">▼ cut ${fmtK(cut)}</span>`;
-  if (h.open_house) s+='<span class="chip oh">📅 open</span>';
+  const cut=priceCut(h); if (cut) s+=`<span class="chip cut" title="price reduced — possibly motivated seller">▼ cut ${fmtK(cut)}</span>`;
+  if (h.open_house) s+='<span class="chip oh" title="open house scheduled — tour it">📅 open</span>';
+  if (isNewToYou(h)) s='<span class="chip newu" title="appeared since your last visit">🆕 new</span>'+s;
   return s;
 }
 function regionAvgS2L(region){ const c=monthsAgoISO(12); const r=DATA.sold.filter(h=>regionOf(h)===region && h.s2l && h.sold_date>=c).map(h=>h.s2l); return r.length?median(r):100; }
@@ -630,7 +623,7 @@ function renderFeed(){
       <div class="spine" style="background:${spineBg};color:${spineC}"><span class="sv">${sv}</span><span class="sl">SCORE</span></div>
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${ppsfHtml}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
-        <div class="chips">${chipsFor(h)}${agree}</div>
+        <div class="chips">${chipsFor(h)}</div>
         ${vd?`<div class="verdict"><span class="vlab" style="background:${vd.c}">${vd.ic} ${vd.lab}</span> <span class="vline">${vd.line}</span> <span class="vr">${vd.reason}</span></div>`:''}
         <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask</span>${domc} ${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}" title="adjust the estimate (buy price, scope, exit) if you want to tinker">🧮 numbers</button>`:''}</span></div>
         ${state.proOpen.has(focusKey(h))?pfPanel(h):''}

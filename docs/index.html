@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="20f3b5b937206fbcf13d9fea5cccf86f">
+<meta name="build" content="db6c2020ba95df0865d3c77624130005">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,6 +112,11 @@
   .pf { margin-top:4px; border-top:1px dashed var(--line); padding-top:9px; display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:7px; font-size:11.5px; }
   .pf label { display:flex; flex-direction:column; gap:3px; color:var(--faint); font-size:9px; font-weight:700; letter-spacing:.04em; min-width:0; cursor:help; }
   .pf .out span { cursor:help; }
+  .pf .pfnotes { grid-column:1/-1; }
+  .pf .pfacts { grid-column:1/-1; display:flex; gap:8px; align-items:center; }
+  .pf .pfacts button { border:1px solid var(--line); background:#fbf7ef; border-radius:8px; padding:4px 10px; font-size:11px; font-weight:600; cursor:pointer; font-family:inherit; color:#6b5e4e; }
+  .pf .pfacts .pfsave { background:#6a4a8a; border-color:#6a4a8a; color:#fff; }
+  .pf .pfstat { font-size:10px; color:#6a4a8a; font-weight:700; }
   .pf .pfcomps { grid-column:1/-1; font-size:10.5px; color:var(--muted); line-height:1.7; }
   .pf .pfcomps a { white-space:nowrap; }
   .pf .warn { color:#b0472a; font-weight:700; }
@@ -410,12 +415,25 @@ function pfP85(pocket){
 // default-assumption base margin for the card face / sort — same math as the
 // panel at its defaults (buy at ask, 1.4× expand). Memoized; cleared when the
 // user's saved assumptions change.
+// per-house saved scopes (from floor-plan review): {buy,target,remodel,carry,vppsf,notes}
+function pfScopes(){ try{ return JSON.parse(localStorage.getItem('hs_scopes')||'{}'); }catch(e){ return {}; } }
+function pfSaveScope(k,s){ const m=pfScopes(); if(s) m[k]=s; else delete m[k]; localStorage.setItem('hs_scopes',JSON.stringify(m)); _pfq.clear(); }
 let _pfq=new Map();
 function pfQuick(h){
   if(h.type==='lot' || !h.price || !h.sqft) return null;
   const k=focusKey(h);
   if(_pfq.has(k)) return _pfq.get(k);
   const a=pfAssum(), f=(1+a.soft/100)*(1+a.cont/100);
+  const sc=pfScopes()[k];
+  if(sc && sc.target && sc.vppsf){
+    const keep=Math.min(h.sqft,sc.target), add=Math.max(0,sc.target-h.sqft);
+    const build=(keep*(sc.remodel||a.remodel)+add*a.addition)*f;
+    const carryT=a.months*(sc.carry||Math.round(h.price*0.065/12/100)*100);
+    const allin=(sc.buy||h.price)+build+carryT;
+    const mg=sc.target*sc.vppsf*(1-a.sell/100)-allin;
+    const rs={mg, pct:Math.round(mg/allin*100), target:sc.target, scoped:true};
+    _pfq.set(k,rs); return rs;
+  }
   const rem=Math.round(a.remodel*pfVintage(h.year||1950));
   const carryTotal=a.months*Math.round(h.price*0.065/12/100)*100;
   let r=null;
@@ -438,12 +456,14 @@ function pfQuick(h){
 function pfAssum(){ try{ return {...PF_DEFAULTS, ...JSON.parse(localStorage.getItem('hs_reno_assum')||'{}')}; }catch(e){ return {...PF_DEFAULTS}; } }
 function pfPanel(h){
   const a=pfAssum(), sqft=h.sqft||0, yr=h.year||1950;
-  const rem=Math.round(a.remodel*pfVintage(yr));
-  const carry=h.price?Math.round(h.price*0.065/12/100)*100:0;
+  const sc=pfScopes()[focusKey(h)];
+  const rem=sc&&sc.remodel?sc.remodel:Math.round(a.remodel*pfVintage(yr));
+  const carry=sc&&sc.carry?sc.carry:(h.price?Math.round(h.price*0.065/12/100)*100:0);
   const f=(1+a.soft/100)*(1+a.cont/100);
-  const target=pfSolve(h.price||0, sqft, rem, a.addition, f, a.months*carry, a.cap, pfP85(h.pocket));
+  const buy=sc&&sc.buy?sc.buy:(h.price||'');
+  const target=sc&&sc.target?sc.target:pfSolve(h.price||0, sqft, rem, a.addition, f, a.months*carry, a.cap, pfP85(h.pocket));
   const band=pfBand(h.pocket,target);
-  const vppsf=band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):''));
+  const vppsf=sc&&sc.vppsf?sc.vppsf:(band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):'')));
   const PF_TIPS={
     buy:'Purchase price. Defaults to asking — set to your expected winning bid (target pockets have cleared ~102% of ask; sitting listings may go under). Target sqft re-solves when you change this.',
     cap:'Your maximum all-in (buy + build + carry). Target sqft auto-solves to the biggest project that fits under this number.',
@@ -457,8 +477,11 @@ function pfPanel(h){
     sell:'Cost to exit: agent commission (~4-5%), transfer tax, staging, concessions. ~5.5% is standard; skip only if you plan to hold, not flip.',
     vppsf:'Exit $/sqft. Auto = top-quartile $/sqft of SOLDS SIZED LIKE YOUR TARGET (±20%, 24 mo, this pocket) — size-aware, since big homes exit at lower $/sqft. Recomputes when you change target sqft; typing here overrides and stops the auto-update. Check it against the exit comps listed below.'};
   const inp=(k,lab,v,x)=>`<label title="${PF_TIPS[k]}">${lab} ⓘ<input name="${k}" type="number" value="${v}"${x||''} title="${PF_TIPS[k]}"></label>`;
-  return `<div class="pf" data-sqft="${sqft}" data-pocket="${(h.pocket||'').replace(/"/g,'')}" data-year="${yr}">
-    ${inp('buy','BUY $',h.price||'')}${inp('cap','MAX ALL-IN $',a.cap)}${inp('target','TARGET SQFT',target,' data-auto="1"')}${inp('remodel','REMODEL $/SF',rem)}${inp('addition','ADDITION $/SF',a.addition)}${inp('soft','SOFT %',a.soft)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('sell','SELL %',a.sell)}${inp('vppsf','RENOV. $/SF',vppsf,' data-auto="1"')}
+  const auto=sc?'':' data-auto="1"';
+  return `<div class="pf" data-sqft="${sqft}" data-pocket="${(h.pocket||'').replace(/"/g,'')}" data-year="${yr}" data-k="${encodeURIComponent(focusKey(h))}">
+    ${inp('buy','BUY $',buy)}${inp('cap','MAX ALL-IN $',a.cap)}${inp('target','TARGET SQFT',target,auto)}${inp('remodel','REMODEL $/SF',rem)}${inp('addition','ADDITION $/SF',a.addition)}${inp('soft','SOFT %',a.soft)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('sell','SELL %',a.sell)}${inp('vppsf','RENOV. $/SF',vppsf,auto)}
+    <label class="pfnotes" title="floor-plan scope notes — walls to open, beams, ensuite plan. Saved with the scope for this house">NOTES<input name="notes" type="text" value="${(sc&&sc.notes?sc.notes:'').replace(/"/g,'&quot;')}" placeholder="e.g. open kitchen wall (beam), ensuite from WIC"></label>
+    <div class="pfacts"><button class="pfsave">💾 ${sc?'update scope':'save scope'}</button>${sc?'<button class="pfclear">✕ clear scope</button>':''}<span class="pfstat">${sc?'✎ saved scope active — badge uses these numbers':''}</span></div>
     <div class="out"></div>
     <div class="pfcomps"></div>
     <div class="note">target sqft auto-solves: biggest project under your max all-in, capped at pocket 85th-pctile size · remodel $/sf scales with vintage (×0.6 if 2005+, ×0.85 if 1985+) · margin is NET of soft + selling costs · bear = exit −8%, build +20%, carry +25% · bull = exit +8%</div>
@@ -535,7 +558,7 @@ function renderFeed(){
     const q=pfQuick(h);
     const rmc = !q?'':(q.over
       ? ` <span class="win" style="color:var(--faint)" title="doesn't fit your ${fmtK(pfAssum().cap)} all-in cap even without expansion">· 🔨 ✕ cap</span>`
-      : ` <span class="win" style="color:${q.pct>=10?'#3c7d54':q.pct>=0?'#a3752a':'#b0472a'}" title="budget-fit reno at your saved assumptions: buy at ask, renovate + expand to ${q.target.toLocaleString()} sf within your ${fmtK(pfAssum().cap)} all-in cap — open 🧮 to adjust">· 🔨 ${q.mg<0?'−':'+'}${fmtK(Math.abs(Math.round(q.mg)))}</span>`);
+      : ` <span class="win" style="color:${q.pct>=10?'#3c7d54':q.pct>=0?'#a3752a':'#b0472a'}" title="${q.scoped?`your saved floor-plan scope: ${q.target.toLocaleString()} sf`:`budget-fit reno at your saved assumptions: buy at ask, renovate + expand to ${q.target.toLocaleString()} sf within your ${fmtK(pfAssum().cap)} all-in cap`} — open 🧮 to adjust">· 🔨${q.scoped?'✎':''} ${q.mg<0?'−':'+'}${fmtK(Math.abs(Math.round(q.mg)))}</span>`);
     const pm=pocketPpsfMap(); const bench = pm[h.pocket] || (h.expected_price&&h.sqft?Math.round(h.expected_price/h.sqft):null);
     const benchSrc = pm[h.pocket] ? 'area' : 'comps';
     let ppsfHtml='';
@@ -564,6 +587,12 @@ function renderFeed(){
   document.querySelectorAll('#feed .pf').forEach(p=>{
     p._ed=new Set();
     p.querySelectorAll('input').forEach(i=>i.oninput=()=>{ p._ed.add(i.name); if(i.name==='vppsf'||i.name==='target') i.dataset.auto='0'; pfRecalc(p); });
+    const sv=p.querySelector('.pfsave'); if(sv) sv.onclick=()=>{
+      const g={}; p.querySelectorAll('input').forEach(i=>g[i.name]=i.name==='notes'?i.value:(+i.value||0));
+      pfSaveScope(decodeURIComponent(p.dataset.k), {buy:g.buy, target:g.target, remodel:g.remodel, carry:g.carry, vppsf:g.vppsf, notes:g.notes});
+      renderFeed();
+    };
+    const cl=p.querySelector('.pfclear'); if(cl) cl.onclick=()=>{ pfSaveScope(decodeURIComponent(p.dataset.k), null); renderFeed(); };
     pfRecalc(p);
   });
 }

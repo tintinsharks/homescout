@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="5ddc6e39318e13f875bf652f31381ca0">
+<meta name="build" content="d93cc511bfe397c6011437b78ae4a419">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -107,6 +107,15 @@
   .fmeta .price { font-size:16px; font-weight:700; } .fmeta .sm { font-size:11px; color:var(--muted); }
   .fmeta .win { font-size:11px; font-weight:700; color:var(--accent); }
   .star { align-self:center; cursor:pointer; font-size:19px; color:#c9bca8; } .star.on { color:var(--amber); }
+  .pfbtn { font-size:10.5px; font-weight:600; border-radius:6px; padding:2px 7px; white-space:nowrap; background:#ece4f2; color:#6a4a8a; border:0; cursor:pointer; font-family:inherit; }
+  .pfbtn.on { background:#6a4a8a; color:#fff; }
+  .pf { margin-top:4px; border-top:1px dashed var(--line); padding-top:9px; display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:7px; font-size:11.5px; }
+  .pf label { display:flex; flex-direction:column; gap:3px; color:var(--faint); font-size:9px; font-weight:700; letter-spacing:.04em; min-width:0; }
+  .pf input { border:1px solid var(--line); border-radius:7px; padding:4px 6px; font-size:12.5px; font-family:inherit; width:100%; background:#fff; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .pf .out { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:5px 18px; align-items:baseline; font-variant-numeric:tabular-nums; font-size:11px; color:var(--muted); }
+  .pf .out b { font-family:'Newsreader',serif; font-size:16px; font-weight:600; color:var(--ink); }
+  .pf .out .mg b { font-size:18px; }
+  .pf .note { grid-column:1/-1; font-size:10px; color:var(--faint); }
   .panel { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 18px; margin-top:18px; box-shadow:0 3px 14px rgba(58,42,32,.05); }
   .panel h2 { font-size:18px; margin:0 0 12px; } .panel h2 .hint { font-family:'Libre Franklin',sans-serif; font-weight:400; color:var(--muted); font-size:12px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -318,7 +327,9 @@ function passFilters(h, isActive){
   if (h.price < +$('fMin').value || h.price > +$('fPrice').value) return false;
   if (h.type === 'lot') { if (isActive && !state.showLots) return false; }
   else {
-    if (h.sqft != null && h.sqft < +$('fSqft').value) return false;
+    // reno candidates are small-by-design (you buy sqft to add) — the fixer
+    // toggle exempts them from the min-sqft floor so they actually surface
+    if (h.sqft != null && h.sqft < +$('fSqft').value && !(isActive && state.fixerOnly && h.reno)) return false;
     if (state.minBeds && (h.beds||0) < state.minBeds) return false;
     const ymin=+$('fYearMin').value; if (h.year!=null && ymin && h.year<ymin) return false;
   }
@@ -362,6 +373,37 @@ function pocketPpsfMap(){
   return _pocketPpsf;
 }
 
+// --- reno pro-forma: all-in cost vs renovated value, inline per card --------
+const PF_DEFAULTS = { remodel:400, addition:750, cont:15, months:12 };
+function pfAssum(){ try{ return {...PF_DEFAULTS, ...JSON.parse(localStorage.getItem('hs_reno_assum')||'{}')}; }catch(e){ return {...PF_DEFAULTS}; } }
+function pfPanel(h){
+  const a=pfAssum(), sqft=h.sqft||0;
+  const target=Math.max(2200, Math.round(sqft*1.4/50)*50);
+  const vppsf=h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):'');
+  const carry=h.price?Math.round(h.price*0.065/12/100)*100:'';
+  const inp=(k,lab,v)=>`<label>${lab}<input name="${k}" type="number" value="${v}"></label>`;
+  return `<div class="pf" data-sqft="${sqft}">
+    ${inp('buy','BUY $',h.price||'')}${inp('target','TARGET SQFT',target)}${inp('remodel','REMODEL $/SF',a.remodel)}${inp('addition','ADDITION $/SF',a.addition)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('vppsf','RENOV. $/SF',vppsf)}
+    <div class="out"></div>
+    <div class="note">renov. $/sf defaults to ${h.reno_bench?'the pocket’s top-quartile sold $/sqft (renovated-product proxy)':'115% of pocket median $/sqft'} · carry defaults to ~6.5%/yr interest on buy</div>
+  </div>`;
+}
+function pfRecalc(p){
+  const v={}; p.querySelectorAll('input').forEach(i=>v[i.name]=+i.value||0);
+  localStorage.setItem('hs_reno_assum', JSON.stringify({remodel:v.remodel, addition:v.addition, cont:v.cont, months:v.months}));
+  const sqft=+p.dataset.sqft||0, keep=Math.min(sqft,v.target), add=Math.max(0,v.target-sqft);
+  const build=(keep*v.remodel + add*v.addition)*(1+v.cont/100);
+  const carry=v.months*v.carry, allin=v.buy+build+carry, val=v.target*v.vppsf, mg=val-allin;
+  const pct=allin?mg/allin*100:0, c=pct>=10?'#3c7d54':pct>=0?'#a3752a':'#b0472a';
+  p.querySelector('.out').innerHTML =
+    `<span>build<br><b>${fmtK(Math.round(build))}</b></span>`+
+    `<span>${add?`(+${add.toLocaleString()} sf added) `:''}carry<br><b>${fmtK(carry)}</b></span>`+
+    `<span>all-in<br><b>${fmtK(Math.round(allin))}</b></span>`+
+    `<span>renov. value<br><b>${fmtK(Math.round(val))}</b></span>`+
+    `<span class="mg">margin<br><b style="color:${c}">${mg<0?'−':''}${fmtK(Math.abs(Math.round(mg)))} (${pct>0?'+':''}${Math.round(pct)}%)</b></span>`;
+}
+state.proOpen = new Set();
+
 function renderFeed(){
   const rows = DATA.active.filter(h=>passFilters(h,true));
   const scoreOf = h => { const s=dealScore(h); return s==null ? -999 : s; };
@@ -401,13 +443,23 @@ function renderFeed(){
       <div class="spine" style="background:${spineBg};color:${spineC}"><span class="sv">${sv}</span><span class="sl">SCORE</span></div>
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${ppsfHtml}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
-        <div class="chips">${chipsFor(h)}${agree}</div>
+        <div class="chips">${chipsFor(h)}${agree}${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">🧮 pro-forma</button>`:''}</div>
         <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}${domc}</span></div>
+        ${state.proOpen.has(focusKey(h))?pfPanel(h):''}
       </div>
       <span class="star${fav?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">${fav?'★':'☆'}</span>
     </div>`;
   }).join('');
   document.querySelectorAll('#feed .star').forEach(el=>el.onclick=()=>toggleFocus(decodeURIComponent(el.dataset.k)));
+  document.querySelectorAll('#feed .pfbtn').forEach(el=>el.onclick=()=>{
+    const k=decodeURIComponent(el.dataset.k);
+    state.proOpen.has(k)?state.proOpen.delete(k):state.proOpen.add(k);
+    renderFeed();
+  });
+  document.querySelectorAll('#feed .pf').forEach(p=>{
+    p.querySelectorAll('input').forEach(i=>i.oninput=()=>pfRecalc(p));
+    pfRecalc(p);
+  });
 }
 
 function bidScopeLabel(){

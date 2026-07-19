@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="cf7bc3455575dc4cde9249497e2d4390">
+<meta name="build" content="51b363caceb3b0fcfba9979e0433a5c7">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -107,6 +107,10 @@
   .fmeta .money .price, .fmeta .money .win { white-space:nowrap; }
   .fmeta .price { font-size:16px; font-weight:700; } .fmeta .sm { font-size:11px; color:var(--muted); }
   .fmeta .win { font-size:11px; font-weight:700; color:var(--accent); }
+  .verdict { display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; margin:1px 0 2px; font-size:12.5px; line-height:1.5; }
+  .verdict .vlab { color:#fff; font-weight:800; font-size:10.5px; letter-spacing:.04em; border-radius:6px; padding:2px 8px; white-space:nowrap; }
+  .verdict .vline { color:var(--ink); font-weight:600; }
+  .verdict .vr { color:var(--muted); font-size:11px; }
   .star { align-self:center; cursor:pointer; font-size:19px; color:#c9bca8; } .star.on { color:var(--amber); }
   .pfbtn { font-size:10.5px; font-weight:600; border-radius:6px; padding:2px 7px; white-space:nowrap; background:#ece4f2; color:#6a4a8a; border:0; cursor:pointer; font-family:inherit; }
   .pfbtn.on { background:#6a4a8a; color:#fff; }
@@ -201,8 +205,8 @@
       <button class="tab" data-r="Focus">⭐ Focus</button>
       <span class="sortlab">SORT</span>
       <button class="sbtn on" data-s="Deal score">Deal score</button>
+      <button class="sbtn" data-s="Verdict">🟢 Tour first</button>
       <button class="sbtn" data-s="Fixer upside">Fixer upside</button>
-      <button class="sbtn" data-s="Reno margin">🔨 margin</button>
       <button class="sbtn" data-s="Price">Price</button>
       <button class="sbtn" data-s="Days listed">Days listed</button>
       <button class="sbtn" data-s="$/sqft">$/sqft</button>
@@ -251,7 +255,7 @@ let DATA=null, MARKET=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
 let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, openOnly:false, avoidHaz:false, showPending:false, showLots:true, newOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
-const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Reno margin':'desc', 'Price':'asc', 'Days listed':'asc', '$/sqft':'asc' };
+const SORT_DEFAULT = { 'Deal score':'desc', 'Verdict':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc', '$/sqft':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
 const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle Hill','Edgewood Park','Canyon','Central','Centennial','Stambaugh-Heller','Redwood Oaks','Palm Park','Friendly Acres','Redwood Village','Roosevelt','Downtown','Bair Island','Redwood Shores','Emerald Hills (county)','Selby-Atherwood (county)','Other county']);
@@ -373,6 +377,42 @@ function pfLayout(h){
 }
 const PF_OPENABLE={closed:1,'likely-closed':1,partial:1};
 function pfIsOpenable(h){ return h.type!=='lot' && !!PF_OPENABLE[pfLayout(h)]; }
+
+// --- plain-English verdict: one scannable line per house, no inputs to fiddle -
+// Keep-footprint open-up framing (live-in lens, no resale cost): does the done
+// home comfortably out-value what you put in? Rate = all-in $/sf to reach a
+// modern open-concept, scaled by how much work the listing already shows.
+function pfUpdated(h){ return /\b(updated|remodel\w*|renovat\w*|designer|new kitchen|move.?in|turn.?key|refreshed|modern(?:ized)?)\b/i.test(h.remarks||''); }
+let _pfv=new Map();
+function pfVerdict(h){
+  const k=focusKey(h);
+  if(_pfv.has(k)) return _pfv.get(k);
+  let v=null;
+  const med0=pocketPpsfMap()[h.pocket];
+  // a home priced under ~45% of its pocket's $/sqft is a teardown/lot, not a
+  // renovate-in-place candidate — the open-up framing doesn't apply
+  const teardown = med0 && h.ppsf && h.ppsf < med0*0.45;
+  if(h.type!=='lot' && h.price && h.sqft && !teardown){
+    const bd = pfBand(h.pocket, h.sqft), med=med0;
+    let exit = (bd&&bd.ppsf75) || h.reno_bench || (med?Math.round(med*1.15):0);
+    if(med) exit=Math.min(exit, med*1.6);   // renovated resale rarely tops ~1.6× pocket median $/sqft; rejects estate-comp noise
+    if(exit){
+      const lay=pfLayout(h), rate = lay==='open' ? 130 : pfUpdated(h) ? 210 : 320;
+      const reno=h.sqft*rate, allin=h.price+reno, worth=h.sqft*exit, m=(worth-allin)/allin;
+      const g = m>=0.05 ? {k:'tour',ic:'🟢',lab:'TOUR',c:'#3c7d54',rk:3}
+              : m>=-0.10 ? {k:'maybe',ic:'🟡',lab:'MAYBE',c:'#a3752a',rk:2}
+              : {k:'skip',ic:'🔴',lab:'SKIP',c:'#b0472a',rk:1};
+      const rnd=(x,s)=>Math.round(x/s)*s;
+      const verb = lay==='open' ? 'refresh finishes' : 'open up + modernize';
+      const cond = lay==='open' ? 'already open-concept' : pfUpdated(h) ? 'already updated — mostly walls + kitchen' : 'dated — full modernization';
+      const tail = g.k==='tour' ? 'builds equity' : g.k==='skip' ? 'priced above what the block supports once done' : '≈ what it costs to build your own';
+      v={...g, m, worth, allin,
+         line:`buy ${fmtK(rnd(h.price,50000))}, ~${fmtK(rnd(reno,25000))} to ${verb}, worth ${fmtK(rnd(worth,50000))} done`,
+         reason:`${cond} · ${tail}`};
+    }
+  }
+  _pfv.set(k,v); return v;
+}
 
 function chipsFor(h){
   let s=''; const opp=(h.opp_flags||[]).map(x=>x.toUpperCase());
@@ -558,7 +598,7 @@ function renderFeed(){
   rows.sort((a,b)=>{
     let cmp;
     if (state.sort==='Fixer upside') cmp = ((a.reno_score||0)-(b.reno_score||0)) || ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
-    else if (state.sort==='Reno margin'){ const m=q=>(q&&!q.over&&q.mg!=null)?q.mg:-1e12; cmp = m(pfQuick(a))-m(pfQuick(b)); }
+    else if (state.sort==='Verdict'){ const vr=h=>{const v=pfVerdict(h); return v?v.rk*100+Math.max(-50,Math.min(50,v.m*100)):-1e4;}; cmp = vr(a)-vr(b); }
     else if (state.sort==='Price') cmp = a.price-b.price;
     else if (state.sort==='Days listed') cmp = (a.dom==null?1e9:a.dom)-(b.dom==null?1e9:b.dom);
     else if (state.sort==='$/sqft') cmp = (a.ppsf==null?1e9:a.ppsf)-(b.ppsf==null?1e9:b.ppsf);
@@ -575,14 +615,9 @@ function renderFeed(){
     const win=h.list_price==null && h.price ? Math.round(h.price*regionAvgS2L(regionOf(h))/100/5000)*5000 : null;
     const fav=state.focus.has(focusKey(h));
     const specs=[h.beds!=null?`<b>${h.beds}</b> bd`:'', h.sqft?`<b>${h.sqft.toLocaleString()}</b> sf`:'', h.lot?`lot ${h.lot.toLocaleString()}`:'', h.year?`built ${h.year}`:''].filter(Boolean).join(' · ');
-    const gvc = g!=null?` <span class="win" style="color:${g>=3?'#3c7d54':'var(--muted)'}">· ${(g>0?'+':'')+Math.round(g)}% comp</span>`:'';
-    const avc = a!=null?` <span class="win" style="color:${a>=3?'#3c7d54':'var(--muted)'}">· ${(a>0?'+':'')+Math.round(a)}% AVM</span>`:'';
     const domc = h.dom!=null?` <span class="sm">· ${h.dom} DOM</span>`:'';
     const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
-    const q=pfQuick(h);
-    const rmc = !q?'':(q.over
-      ? ` <span class="win" style="color:var(--faint)" title="doesn't fit your ${fmtK(pfAssum().cap)} all-in cap even without expansion">· 🔨 ✕ cap</span>`
-      : ` <span class="win" style="color:${q.pct>=10?'#3c7d54':q.pct>=0?'#a3752a':'#b0472a'}" title="${q.scoped?`your saved floor-plan scope: ${q.target.toLocaleString()} sf`:`budget-fit reno at your saved assumptions: buy at ask, renovate + expand to ${q.target.toLocaleString()} sf within your ${fmtK(pfAssum().cap)} all-in cap`} — open 🧮 to adjust">· 🔨${q.scoped?'✎':''} ${q.mg<0?'−':'+'}${fmtK(Math.abs(Math.round(q.mg)))}</span>`);
+    const vd=pfVerdict(h);
     const pm=pocketPpsfMap(); const bench = pm[h.pocket] || (h.expected_price&&h.sqft?Math.round(h.expected_price/h.sqft):null);
     const benchSrc = pm[h.pocket] ? 'area' : 'comps';
     let ppsfHtml='';
@@ -595,8 +630,9 @@ function renderFeed(){
       <div class="spine" style="background:${spineBg};color:${spineC}"><span class="sv">${sv}</span><span class="sl">SCORE</span></div>
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${ppsfHtml}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
-        <div class="chips">${chipsFor(h)}${agree}${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">🧮 pro-forma</button>`:''}</div>
-        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}${rmc}${domc}</span></div>
+        <div class="chips">${chipsFor(h)}${agree}</div>
+        ${vd?`<div class="verdict"><span class="vlab" style="background:${vd.c}">${vd.ic} ${vd.lab}</span> <span class="vline">${vd.line}</span> <span class="vr">${vd.reason}</span></div>`:''}
+        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask</span>${domc} ${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}" title="adjust the estimate (buy price, scope, exit) if you want to tinker">🧮 numbers</button>`:''}</span></div>
         ${state.proOpen.has(focusKey(h))?pfPanel(h):''}
       </div>
       <span class="star${fav?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">${fav?'★':'☆'}</span>

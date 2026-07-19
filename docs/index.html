@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="c353a7e7183b09771831331f73a3144b">
+<meta name="build" content="53c6804b336086a03e1ac9597d96b6d5">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -195,6 +195,7 @@
       <span class="sortlab">SORT</span>
       <button class="sbtn on" data-s="Deal score">Deal score</button>
       <button class="sbtn" data-s="Fixer upside">Fixer upside</button>
+      <button class="sbtn" data-s="Reno margin">🔨 margin</button>
       <button class="sbtn" data-s="Price">Price</button>
       <button class="sbtn" data-s="Days listed">Days listed</button>
       <button class="sbtn" data-s="$/sqft">$/sqft</button>
@@ -243,7 +244,7 @@ let DATA=null, MARKET=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
 let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, newOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
-const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc', '$/sqft':'asc' };
+const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Reno margin':'desc', 'Price':'asc', 'Days listed':'asc', '$/sqft':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
 const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle Hill','Edgewood Park','Canyon','Central','Centennial','Stambaugh-Heller','Redwood Oaks','Palm Park','Friendly Acres','Redwood Village','Roosevelt','Downtown','Bair Island','Redwood Shores','Emerald Hills (county)','Selby-Atherwood (county)','Other county']);
@@ -397,6 +398,28 @@ function pfP85(pocket){
   const sq=DATA.sold.filter(s=>s.pocket===pocket && s.sqft).map(s=>s.sqft).sort((a,b)=>a-b);
   return sq.length>=8 ? sq[Math.floor(sq.length*0.85)] : null;
 }
+// default-assumption base margin for the card face / sort — same math as the
+// panel at its defaults (buy at ask, 1.4× expand). Memoized; cleared when the
+// user's saved assumptions change.
+let _pfq=new Map();
+function pfQuick(h){
+  if(h.type==='lot' || !h.price || !h.sqft) return null;
+  const k=focusKey(h);
+  if(_pfq.has(k)) return _pfq.get(k);
+  const a=pfAssum(), target=Math.max(2200, Math.round(h.sqft*1.4/50)*50);
+  const band=pfBand(h.pocket,target);
+  const vppsf=band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):0));
+  let r=null;
+  if(vppsf){
+    const keep=Math.min(h.sqft,target), add=Math.max(0,target-h.sqft);
+    const build=(keep*a.remodel+add*a.addition)*(1+a.soft/100)*(1+a.cont/100);
+    const carry=a.months*Math.round(h.price*0.065/12/100)*100;
+    const allin=h.price+build+carry;
+    const mg=target*vppsf*(1-a.sell/100)-allin;
+    r={mg, pct:Math.round(mg/allin*100)};
+  }
+  _pfq.set(k,r); return r;
+}
 function pfAssum(){ try{ return {...PF_DEFAULTS, ...JSON.parse(localStorage.getItem('hs_reno_assum')||'{}')}; }catch(e){ return {...PF_DEFAULTS}; } }
 function pfPanel(h){
   const a=pfAssum(), sqft=h.sqft||0;
@@ -426,6 +449,7 @@ function pfPanel(h){
 function pfRecalc(p){
   const v={}; p.querySelectorAll('input').forEach(i=>v[i.name]=+i.value||0);
   localStorage.setItem('hs_reno_assum', JSON.stringify({remodel:v.remodel, addition:v.addition, cont:v.cont, months:v.months, soft:v.soft, sell:v.sell}));
+  _pfq.clear();   // card-face margins use these assumptions too
   const pocket=p.dataset.pocket, band=pfBand(pocket, v.target);
   const vi=p.querySelector('input[name=vppsf]');
   if(vi.dataset.auto==='1' && band){ vi.value=band.ppsf75; v.vppsf=band.ppsf75; }
@@ -457,6 +481,7 @@ function renderFeed(){
   rows.sort((a,b)=>{
     let cmp;
     if (state.sort==='Fixer upside') cmp = ((a.reno_score||0)-(b.reno_score||0)) || ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
+    else if (state.sort==='Reno margin'){ const qa=pfQuick(a), qb=pfQuick(b); cmp = (qa?qa.mg:-1e12)-(qb?qb.mg:-1e12); }
     else if (state.sort==='Price') cmp = a.price-b.price;
     else if (state.sort==='Days listed') cmp = (a.dom==null?1e9:a.dom)-(b.dom==null?1e9:b.dom);
     else if (state.sort==='$/sqft') cmp = (a.ppsf==null?1e9:a.ppsf)-(b.ppsf==null?1e9:b.ppsf);
@@ -477,6 +502,8 @@ function renderFeed(){
     const avc = a!=null?` <span class="win" style="color:${a>=3?'#3c7d54':'var(--muted)'}">· ${(a>0?'+':'')+Math.round(a)}% AVM</span>`:'';
     const domc = h.dom!=null?` <span class="sm">· ${h.dom} DOM</span>`:'';
     const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
+    const q=pfQuick(h);
+    const rmc = q?` <span class="win" style="color:${q.pct>=10?'#3c7d54':q.pct>=0?'#a3752a':'#b0472a'}" title="reno pro-forma base margin at your saved assumptions (buy at ask, expand to 1.4×, full remodel) — open 🧮 to adjust scope">· 🔨 ${q.mg<0?'−':'+'}${fmtK(Math.abs(Math.round(q.mg)))}</span>`:'';
     const pm=pocketPpsfMap(); const bench = pm[h.pocket] || (h.expected_price&&h.sqft?Math.round(h.expected_price/h.sqft):null);
     const benchSrc = pm[h.pocket] ? 'area' : 'comps';
     let ppsfHtml='';
@@ -490,7 +517,7 @@ function renderFeed(){
       <div class="fbody">
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${ppsfHtml}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
         <div class="chips">${chipsFor(h)}${agree}${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">🧮 pro-forma</button>`:''}</div>
-        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}${domc}</span></div>
+        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask${h.expected_price?' · comp '+fmtK(h.expected_price):''}</span>${win?` <span class="win">· win ≈ ${fmtK(win)}</span>`:''}${gvc}${avc}${rmc}${domc}</span></div>
         ${state.proOpen.has(focusKey(h))?pfPanel(h):''}
       </div>
       <span class="star${fav?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">${fav?'★':'☆'}</span>

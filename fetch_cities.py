@@ -13,6 +13,7 @@ gem-scored against the full combined comp pool.
 
 import json
 import sys
+import threading
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -22,6 +23,32 @@ import fetch_data as fd
 from enrich_data import OPP_KEYWORDS
 
 DATA_FILE = fd.DOCS / "data.json"
+# HomeHarvest's scrape_property has no read timeout, so a single unresponsive
+# Realtor.com socket can hang forever and freeze the whole refresh (it once
+# stalled ~7h, blocking every scheduled run behind it). Run each call in a
+# daemon thread and abandon it past this many seconds — the caller's except
+# block then skips that city and continues. Normal calls finish in seconds.
+SCRAPE_TIMEOUT = 180
+
+
+def scrape_property_timeout(**kwargs):
+    """scrape_property with a hard wall-clock timeout. Raises TimeoutError if the
+    call outlives SCRAPE_TIMEOUT; the stuck daemon thread is abandoned (dies on
+    process exit) so it can never block the pipeline or a clean shutdown."""
+    box = {}
+    def run():
+        try:
+            box["df"] = scrape_property(**kwargs)
+        except Exception as e:      # noqa: BLE001 — re-raised in caller thread
+            box["err"] = e
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(SCRAPE_TIMEOUT)
+    if t.is_alive():
+        raise TimeoutError(f"scrape_property exceeded {SCRAPE_TIMEOUT}s")
+    if "err" in box:
+        raise box["err"]
+    return box.get("df")
 # (location, pocket name or None to classify by polygon, also fetch solds?)
 # The core three cities are covered by Redfin for solds, but their ACTIVES are
 # pulled here too: Redfin's CSV endpoint omits some MLS listings by rule, so
@@ -136,8 +163,8 @@ def main():
         for lt in ("for_sale", "pending"):
             for ptype, typ in (("single_family", "home"), ("land", "lot")):
                 try:
-                    df = scrape_property(location=loc, listing_type=lt,
-                                         property_type=[ptype])
+                    df = scrape_property_timeout(location=loc, listing_type=lt,
+                                                 property_type=[ptype])
                 except Exception as e:
                     print(f"{loc} {lt} {ptype} failed: {e}", file=sys.stderr)
                     continue
@@ -152,8 +179,8 @@ def main():
         if not want_solds:     # core cities: Redfin already provides solds
             continue
         try:
-            df = scrape_property(location=loc, listing_type="sold",
-                                 property_type=["single_family"], past_days=SOLD_DAYS)
+            df = scrape_property_timeout(location=loc, listing_type="sold",
+                                         property_type=["single_family"], past_days=SOLD_DAYS)
         except Exception as e:
             print(f"{loc} sold failed: {e}", file=sys.stderr)
             continue

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="396725e1de410570598aac426044e0ff">
+<meta name="build" content="5ddc6e39318e13f875bf652f31381ca0">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -291,7 +291,7 @@ function isNewToYou(h){ return !HS_FIRST_VISIT && !SEEN_KEYS.has(listingKey(h));
 function markSeen(){ try{ localStorage.setItem('hs_seen', JSON.stringify(DATA.active.map(listingKey))); }catch(e){} }
 const justListed = h => h.dom!=null && h.dom<=7;
 function monthsAgoISO(n){ const d=new Date(DATA.generated_at); d.setMonth(d.getMonth()-n); return d.toISOString().slice(0,10); }
-const hasUpside = h => (h.opp_flags && h.opp_flags.length) > 0;
+const hasUpside = h => h.reno || (h.opp_flags && h.opp_flags.length) > 0;
 const hasHaz = h => !!(h.fire_zone || h.flood_zone);
 const isNew = h => (h.dom != null && h.dom <= 4);
 function priceCut(h){ if(!h.price_history||h.price_history.length<2) return 0; const max=Math.max(...h.price_history.map(p=>p[1])); return max>h.price?max-h.price:0; }
@@ -339,7 +339,8 @@ function chipsFor(h){
   const has=re=>opp.some(k=>re.test(k));
   if (has(/ADU|IN.?LAW/)) s+='<span class="chip up">🏠 ADU</span>';
   if (has(/EXPAND|POTENTIAL|BRING/)) s+='<span class="chip up">↔️ expand</span>';
-  if (has(/FIXER|TLC|AS.?IS|ORIGINAL|COSMETIC|CONTRACTOR|NEEDS|SWEAT|PROBATE|ESTATE|TRUST/)) s+='<span class="chip up">🔨 fixer</span>';
+  if (h.reno) s+='<span class="chip up" title="reno candidate '+h.reno_score+'/5: fixer signals + pre-1975 + 6000+ lot + priced under renovated $/sqft'+(h.reno_bench?' (bench $'+h.reno_bench+'/sqft)':'')+'">🔨 reno '+h.reno_score+'/5</span>';
+  else if (has(/FIXER|TLC|AS.?IS|ORIGINAL|COSMETIC|CONTRACTOR|NEEDS|SWEAT|PROBATE|ESTATE|TRUST/)) s+='<span class="chip up">🔨 fixer</span>';
   if (h.fire_zone) s+=`<span class="chip fire" title="CalFire ${h.fire_zone}">🔥 ${h.fire_zone==='Very High'?'fire VH':'fire'}</span>`;
   if (h.flood_zone) s+=`<span class="chip flood" title="FEMA ${h.flood_zone}">🌊 flood</span>`;
   if (/Bair Island|Shores/.test(h.pocket||'')) s+='<span class="chip wet">🌿 wetland</span>';
@@ -367,7 +368,7 @@ function renderFeed(){
   const dir = state.sortDir==='asc' ? 1 : -1;   // asc comparator, flipped for desc
   rows.sort((a,b)=>{
     let cmp;
-    if (state.sort==='Fixer upside') cmp = ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
+    if (state.sort==='Fixer upside') cmp = ((a.reno_score||0)-(b.reno_score||0)) || ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
     else if (state.sort==='Price') cmp = a.price-b.price;
     else if (state.sort==='Days listed') cmp = (a.dom==null?1e9:a.dom)-(b.dom==null?1e9:b.dom);
     else if (state.sort==='$/sqft') cmp = (a.ppsf==null?1e9:a.ppsf)-(b.ppsf==null?1e9:b.ppsf);

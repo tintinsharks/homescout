@@ -10,7 +10,11 @@ Stdlib only; point-in-polygon reused from fetch_data.
 """
 
 import json
+import re
+import sys
+import urllib.request
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import fetch_data as fd
 
@@ -66,11 +70,104 @@ def main():
             h["flood_zone"] = flood
             n_flood += 1
 
-    track_history(data)   # first-seen + price cuts across ALL cities (was RWC-only)
+    reno_tag(data)   # before slim(): scoring reads the full 500-char remarks
+    hist = track_history(data)   # first-seen + price cuts across ALL cities (was RWC-only)
+    send_reno_alerts(data, hist)
     slim(data)   # drop bytes the browser never reads → faster/more reliable Pages builds
     DATA_FILE.write_text(json.dumps(data, separators=(",", ":")))
     print(f"hazard-tagged {len(data['active'])} actives: "
           f"{n_fire} in fire zones, {n_flood} in flood zones")
+
+
+# --- renovation candidates -------------------------------------------------
+# A reno play buys small/dated stock on good dirt below the pocket's renovated
+# $/sqft, so the usual 2000+ sqft / turnkey filters would hide exactly these.
+RENO_KEYWORDS = re.compile(
+    r"fixer|tlc|as.?is|original condition|opportunit|contractor|remodel|expand"
+    r"|potential|estate sale|probate|sweat|bring your|value.?add|land value"
+    r"|diamond in the rough|cosmetic|needs work", re.I)
+RENO_MAX_PRICE = 2_800_000   # leaves ~$500K+ of reno budget under the $3.3M cap
+RENO_ALERT_CITIES = ("Redwood City", "Emerald Hills", "Menlo Park", "Atherton")
+
+
+def reno_tag(data):
+    """Score actives as renovation candidates (0-5); reno=True at score>=4.
+
+    +2 fixer language (opp_flags or remarks), +1 pre-1975, +1 lot>=6000 sqft,
+    +1 asking $/sqft <85% of the pocket's top-quartile sold $/sqft (a proxy
+    for what renovated product resells at, shipped as reno_bench)."""
+    by_pocket = {}
+    for s in data["sold"]:
+        if s.get("ppsf") and s.get("pocket"):
+            by_pocket.setdefault(s["pocket"], []).append(s["ppsf"])
+    bench = {}
+    for p, pp in by_pocket.items():
+        if len(pp) >= 8:
+            pp.sort()
+            bench[p] = pp[int(len(pp) * 0.75)]
+    n = 0
+    for h in data["active"]:
+        for k in ("reno", "reno_score", "reno_bench"):
+            h.pop(k, None)
+        if h.get("type") == "lot" or not h.get("price") or h["price"] > RENO_MAX_PRICE:
+            continue
+        fixerish = bool(h.get("opp_flags")) or bool(RENO_KEYWORDS.search(h.get("remarks") or ""))
+        old = (h.get("year") or 9999) < 1975
+        biglot = (h.get("lot") or 0) >= 6000
+        b = bench.get(h.get("pocket"))
+        cheap = bool(h.get("ppsf") and b and h["ppsf"] < b * 0.85)
+        score = 2 * fixerish + old + biglot + cheap
+        if score >= 3:
+            h["reno_score"] = score
+            if b:
+                h["reno_bench"] = b
+            if score >= 4:
+                h["reno"] = True
+                n += 1
+    print(f"reno-tagged {n} candidates (score>=4)")
+
+
+def send_reno_alerts(data, hist):
+    """Discord-alert each reno candidate (score>=4, RWC/Menlo area) once ever.
+
+    Same opt-in config as fetch_data.send_alerts: ~/.homescout_alerts.json
+    {"discord_webhook_url": ...}. Alerted keys are remembered in history.json
+    (reno_alerted flag) so 4-hourly refreshes don't repeat themselves."""
+    cfg_path = Path.home() / ".homescout_alerts.json"
+    if not cfg_path.exists():
+        return
+    try:
+        url = json.loads(cfg_path.read_text()).get("discord_webhook_url")
+    except Exception:
+        return
+    if not url:
+        return
+    lines = []
+    for h in data["active"]:
+        if not h.get("reno") or h.get("city") not in RENO_ALERT_CITIES:
+            continue
+        key = h.get("mls") or h.get("address")
+        e = hist.get(key)
+        if e is None or e.get("reno_alerted"):
+            continue
+        e["reno_alerted"] = True
+        gem = " · gem {:+.0f}%".format(h["gem_pct"]) if h.get("gem_pct") is not None else ""
+        bench = " · reno bench ${}/sqft".format(h["reno_bench"]) if h.get("reno_bench") else ""
+        lines.append("🔨 **{}** ({}) — ${:,} · {:,} sqft · lot {:,} · y{} · "
+                     "reno {}/5{}{}\n{}".format(
+                         h["address"], h["pocket"], h["price"], h.get("sqft") or 0,
+                         h.get("lot") or 0, h.get("year") or "?",
+                         h["reno_score"], gem, bench, h["url"]))
+    if not lines:
+        return
+    body = json.dumps({"content": "🏡 **HomeScout reno radar**\n" + "\n\n".join(lines[:8])}).encode()
+    try:
+        req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=20)
+        HISTORY_FILE.write_text(json.dumps(hist, separators=(",", ":")))
+        print("sent {} reno alert(s) to Discord".format(len(lines)))
+    except Exception as e:
+        print("reno alert send failed: {}".format(e), file=sys.stderr)
 
 
 def track_history(data):
@@ -108,6 +205,7 @@ def track_history(data):
         del hist[k]
     HISTORY_FILE.write_text(json.dumps(hist, separators=(",", ":")))
     print(f"history: {n_cut} price cuts, {n_new} first-seen ≤7d, {len(hist)} tracked")
+    return hist
 
 
 # fields the frontend never reads off a SOLD row (kept on actives)

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="20a172f4ee7bb856488b830d35b65ba2">
+<meta name="build" content="c353a7e7183b09771831331f73a3144b">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -112,6 +112,9 @@
   .pf { margin-top:4px; border-top:1px dashed var(--line); padding-top:9px; display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:7px; font-size:11.5px; }
   .pf label { display:flex; flex-direction:column; gap:3px; color:var(--faint); font-size:9px; font-weight:700; letter-spacing:.04em; min-width:0; cursor:help; }
   .pf .out span { cursor:help; }
+  .pf .pfcomps { grid-column:1/-1; font-size:10.5px; color:var(--muted); line-height:1.7; }
+  .pf .pfcomps a { white-space:nowrap; }
+  .pf .warn { color:#b0472a; font-weight:700; }
   .pf input { border:1px solid var(--line); border-radius:7px; padding:4px 6px; font-size:12.5px; font-family:inherit; width:100%; background:#fff; color:var(--ink); font-variant-numeric:tabular-nums; }
   .pf .out { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:5px 18px; align-items:baseline; font-variant-numeric:tabular-nums; font-size:11px; color:var(--muted); }
   .pf .out b { font-family:'Newsreader',serif; font-size:16px; font-weight:600; color:var(--ink); }
@@ -375,12 +378,31 @@ function pocketPpsfMap(){
 }
 
 // --- reno pro-forma: all-in cost vs renovated value, inline per card --------
-const PF_DEFAULTS = { remodel:400, addition:750, cont:15, months:12 };
+const PF_DEFAULTS = { remodel:400, addition:750, cont:15, months:12, soft:12, sell:5.5 };
+// sold comps sized like the renovation TARGET (±tol, 24 mo, same pocket) — $/sqft
+// falls as homes grow, so exit $/sf must come from similarly-sized sales
+function pfBand(pocket, target){
+  const cut=monthsAgoISO(24);
+  let band=[], tol=0.2;
+  for(; tol<=0.35; tol+=0.15){
+    band=DATA.sold.filter(s=>s.pocket===pocket && s.sold_date>=cut && s.sqft && s.ppsf && Math.abs(s.sqft-target)<=target*tol);
+    if(band.length>=4) break;
+  }
+  if(band.length<4) return null;
+  band.sort((a,b)=>b.ppsf-a.ppsf);
+  const pp=band.map(s=>s.ppsf).sort((a,b)=>a-b);
+  return { ppsf75: pp[Math.floor(pp.length*0.75)], band, tol: Math.min(tol,0.35) };
+}
+function pfP85(pocket){
+  const sq=DATA.sold.filter(s=>s.pocket===pocket && s.sqft).map(s=>s.sqft).sort((a,b)=>a-b);
+  return sq.length>=8 ? sq[Math.floor(sq.length*0.85)] : null;
+}
 function pfAssum(){ try{ return {...PF_DEFAULTS, ...JSON.parse(localStorage.getItem('hs_reno_assum')||'{}')}; }catch(e){ return {...PF_DEFAULTS}; } }
 function pfPanel(h){
   const a=pfAssum(), sqft=h.sqft||0;
   const target=Math.max(2200, Math.round(sqft*1.4/50)*50);
-  const vppsf=h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):'');
+  const band=pfBand(h.pocket,target);
+  const vppsf=band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):''));
   const carry=h.price?Math.round(h.price*0.065/12/100)*100:'';
   const PF_TIPS={
     buy:'Purchase price. Defaults to asking — set to your expected winning bid (target pockets have cleared ~102% of ask; sitting listings may go under).',
@@ -390,27 +412,41 @@ function pfPanel(h){
     cont:'Surprise buffer applied to the whole build. 15% is the floor; use 20%+ on pre-1960 homes (knob-and-tube, galvanized plumbing, foundation unknowns) or anything unpermitted.',
     months:'Design + permits + construction. Realistic: 12–18 months in RWC city; county parcels (Emerald Hills, Selby) permit slower. Big additions trend longer.',
     carry:'Monthly holding cost while you build — financing interest, property tax, insurance, utilities. Default ≈ 6.5%/yr interest on buy ÷ 12; zero it if paying cash and ignoring opportunity cost.',
-    vppsf:'What renovated product resells for per sqft here. Default = the pocket’s top-quartile sold $/sqft (renovated-product proxy), else 115% of pocket median. Sanity-check against 2-3 actual remodeled comps before trusting a margin.'};
-  const inp=(k,lab,v)=>`<label title="${PF_TIPS[k]}">${lab} ⓘ<input name="${k}" type="number" value="${v}" title="${PF_TIPS[k]}"></label>`;
-  return `<div class="pf" data-sqft="${sqft}">
-    ${inp('buy','BUY $',h.price||'')}${inp('target','TARGET SQFT',target)}${inp('remodel','REMODEL $/SF',a.remodel)}${inp('addition','ADDITION $/SF',a.addition)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('vppsf','RENOV. $/SF',vppsf)}
+    soft:'Soft costs on top of hard construction — architect/engineering (~8-10% of build), city permit + impact fees, surveys. 12% is typical for an addition; simple interior remodels run less.',
+    sell:'Cost to exit: agent commission (~4-5%), transfer tax, staging, concessions. ~5.5% is standard; skip only if you plan to hold, not flip.',
+    vppsf:'Exit $/sqft. Auto = top-quartile $/sqft of SOLDS SIZED LIKE YOUR TARGET (±20%, 24 mo, this pocket) — size-aware, since big homes exit at lower $/sqft. Recomputes when you change target sqft; typing here overrides and stops the auto-update. Check it against the exit comps listed below.'};
+  const inp=(k,lab,v,x)=>`<label title="${PF_TIPS[k]}">${lab} ⓘ<input name="${k}" type="number" value="${v}"${x||''} title="${PF_TIPS[k]}"></label>`;
+  return `<div class="pf" data-sqft="${sqft}" data-pocket="${(h.pocket||'').replace(/"/g,'')}">
+    ${inp('buy','BUY $',h.price||'')}${inp('target','TARGET SQFT',target)}${inp('remodel','REMODEL $/SF',a.remodel)}${inp('addition','ADDITION $/SF',a.addition)}${inp('soft','SOFT %',a.soft)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('sell','SELL %',a.sell)}${inp('vppsf','RENOV. $/SF',vppsf,' data-auto="1"')}
     <div class="out"></div>
-    <div class="note">renov. $/sf defaults to ${h.reno_bench?'the pocket’s top-quartile sold $/sqft (renovated-product proxy)':'115% of pocket median $/sqft'} · carry defaults to ~6.5%/yr interest on buy</div>
+    <div class="pfcomps"></div>
+    <div class="note">margin is NET of soft + selling costs · bear = exit −8%, build +20%, carry +25% · bull = exit +8% · carry defaults to ~6.5%/yr interest on buy</div>
   </div>`;
 }
 function pfRecalc(p){
   const v={}; p.querySelectorAll('input').forEach(i=>v[i.name]=+i.value||0);
-  localStorage.setItem('hs_reno_assum', JSON.stringify({remodel:v.remodel, addition:v.addition, cont:v.cont, months:v.months}));
+  localStorage.setItem('hs_reno_assum', JSON.stringify({remodel:v.remodel, addition:v.addition, cont:v.cont, months:v.months, soft:v.soft, sell:v.sell}));
+  const pocket=p.dataset.pocket, band=pfBand(pocket, v.target);
+  const vi=p.querySelector('input[name=vppsf]');
+  if(vi.dataset.auto==='1' && band){ vi.value=band.ppsf75; v.vppsf=band.ppsf75; }
   const sqft=+p.dataset.sqft||0, keep=Math.min(sqft,v.target), add=Math.max(0,v.target-sqft);
-  const build=(keep*v.remodel + add*v.addition)*(1+v.cont/100);
-  const carry=v.months*v.carry, allin=v.buy+build+carry, val=v.target*v.vppsf, mg=val-allin;
+  const build=(keep*v.remodel + add*v.addition)*(1+v.soft/100)*(1+v.cont/100);
+  const carry=v.months*v.carry, allin=v.buy+build+carry, val=v.target*v.vppsf;
+  const net=x=>x*(1-v.sell/100), mg=net(val)-allin;
+  const bear=net(val*0.92)-(v.buy+build*1.2+carry*1.25), bull=net(val*1.08)-allin;
   const pct=allin?mg/allin*100:0, c=pct>=10?'#3c7d54':pct>=0?'#a3752a':'#b0472a';
+  const F=x=>(x<0?'−':'+')+fmtK(Math.abs(Math.round(x)));
   p.querySelector('.out').innerHTML =
-    `<span title="construction total: ${keep.toLocaleString()} sf remodel × $${v.remodel}/sf${add?` + ${add.toLocaleString()} sf addition × $${v.addition}/sf`:''}, × ${100+v.cont}% with contingency">build<br><b>${fmtK(Math.round(build))}</b></span>`+
+    `<span title="construction: ${keep.toLocaleString()} sf remodel × $${v.remodel}/sf${add?` + ${add.toLocaleString()} sf addition × $${v.addition}/sf`:''}, +${v.soft}% soft costs, +${v.cont}% contingency">build<br><b>${fmtK(Math.round(build))}</b></span>`+
     `<span title="holding cost: ${v.months} months × $${v.carry.toLocaleString()}/mo">${add?`(+${add.toLocaleString()} sf added) `:''}carry<br><b>${fmtK(carry)}</b></span>`+
     `<span title="buy + build + carry — your total cash into the project">all-in<br><b>${fmtK(Math.round(allin))}</b></span>`+
-    `<span title="exit value: ${v.target.toLocaleString()} sf × $${v.vppsf.toLocaleString()}/sf renovated">renov. value<br><b>${fmtK(Math.round(val))}</b></span>`+
-    `<span class="mg" title="renovated value − all-in. Aim ≥10-15% to absorb what the pro-forma can't see; near zero means you're working for free">margin<br><b style="color:${c}">${mg<0?'−':''}${fmtK(Math.abs(Math.round(mg)))} (${pct>0?'+':''}${Math.round(pct)}%)</b></span>`;
+    `<span title="${v.target.toLocaleString()} sf × $${v.vppsf.toLocaleString()}/sf = ${fmtK(Math.round(val))} gross, −${v.sell}% selling costs">net exit<br><b>${fmtK(Math.round(net(val)))}</b></span>`+
+    `<span class="mg" title="net exit − all-in, after soft + selling costs. Bear: exit −8%, build +20%, carry +25%. Bull: exit +8%. Aim base ≥10-15%; a positive bull with a negative base is a gamble, not a plan">margin bear·base·bull<br><b style="color:${c}">${F(bear)} · ${F(mg)} (${pct>0?'+':''}${Math.round(pct)}%) · ${F(bull)}</b></span>`;
+  const cd=p.querySelector('.pfcomps'), p85=pfP85(pocket);
+  const warn = p85 && v.target>p85 ? `<span class="warn">⚠ target ${v.target.toLocaleString()} sf &gt; 85th-pctile pocket sale (${p85.toLocaleString()} sf) — biggest-house-on-the-block exits sell at a discount</span><br>` : '';
+  cd.innerHTML = band
+    ? warn+`exit comps (±${Math.round(band.tol*100)}% of target, 24 mo): `+band.band.slice(0,4).map(s=>`<a href="${s.url}" target="_blank" title="sold ${s.sold_date} · ${s.sqft.toLocaleString()} sf">${s.address} ${fmtK(s.price)} · $${s.ppsf.toLocaleString()}/sf</a>`).join('  ·  ')
+    : warn+`no size-matched sold comps in this pocket — exit $/sf is a flat fallback; treat the margin with suspicion`;
 }
 state.proOpen = new Set();
 
@@ -467,7 +503,7 @@ function renderFeed(){
     renderFeed();
   });
   document.querySelectorAll('#feed .pf').forEach(p=>{
-    p.querySelectorAll('input').forEach(i=>i.oninput=()=>pfRecalc(p));
+    p.querySelectorAll('input').forEach(i=>i.oninput=()=>{ if(i.name==='vppsf') i.dataset.auto='0'; pfRecalc(p); });
     pfRecalc(p);
   });
 }

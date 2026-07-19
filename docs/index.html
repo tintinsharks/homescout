@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="26650f98835f8b045764431cc939e516">
+<meta name="build" content="396725e1de410570598aac426044e0ff">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -184,6 +184,7 @@
       <button class="sbtn" data-s="Fixer upside">Fixer upside</button>
       <button class="sbtn" data-s="Price">Price</button>
       <button class="sbtn" data-s="Days listed">Days listed</button>
+      <button class="sbtn" data-s="$/sqft">$/sqft</button>
     </div>
 
     <div class="feed" id="feed"></div>
@@ -229,7 +230,7 @@ let DATA=null, MARKET=null;
 let tempChart=null, seasonChart=null, trendChart=null, scatterChart=null;
 const DEFAULT_POCKETS = ['Eagle Hill','Edgewood Park','Emerald Hills (county)','Farm Hills','Mount Carmel','Other county','Redwood Shores','Roosevelt','Selby-Atherwood (county)','Woodside Plaza','Menlo Park','West Menlo (county)','Atherton'];
 let state = { region:'', sort:'Deal score', sortDir:'desc', targetsOnly:false, fixerOnly:false, avoidHaz:false, showPending:false, showLots:true, newOnly:false, bidOpen:false, focus:loadFocus(), pockets:new Set(DEFAULT_POCKETS), areaExpanded:new Set(['Redwood City','Menlo Park']), areaSearch:'' };
-const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc' };
+const SORT_DEFAULT = { 'Deal score':'desc', 'Fixer upside':'desc', 'Price':'asc', 'Days listed':'asc', '$/sqft':'asc' };
 
 // pockets that are neighborhoods WITHIN a city (everything else is its own city)
 const RWC_HOODS = new Set(['Woodside Plaza','Farm Hills','Mount Carmel','Eagle Hill','Edgewood Park','Canyon','Central','Centennial','Stambaugh-Heller','Redwood Oaks','Palm Park','Friendly Acres','Redwood Village','Roosevelt','Downtown','Bair Island','Redwood Shores','Emerald Hills (county)','Selby-Atherwood (county)','Other county']);
@@ -369,6 +370,7 @@ function renderFeed(){
     if (state.sort==='Fixer upside') cmp = ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
     else if (state.sort==='Price') cmp = a.price-b.price;
     else if (state.sort==='Days listed') cmp = (a.dom==null?1e9:a.dom)-(b.dom==null?1e9:b.dom);
+    else if (state.sort==='$/sqft') cmp = (a.ppsf==null?1e9:a.ppsf)-(b.ppsf==null?1e9:b.ppsf);
     else cmp = scoreOf(a)-scoreOf(b);
     return cmp*dir;
   });

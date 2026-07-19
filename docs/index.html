@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="53c6804b336086a03e1ac9597d96b6d5">
+<meta name="build" content="20f3b5b937206fbcf13d9fea5cccf86f">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -379,7 +379,16 @@ function pocketPpsfMap(){
 }
 
 // --- reno pro-forma: all-in cost vs renovated value, inline per card --------
-const PF_DEFAULTS = { remodel:400, addition:750, cont:15, months:12, soft:12, sell:5.5 };
+const PF_DEFAULTS = { remodel:400, addition:750, cont:15, months:12, soft:12, sell:5.5, cap:3500000 };
+// remodel $/sf scales with vintage: a 2010s house needs finishes, a 1950s one needs systems
+function pfVintage(y){ return y>=2005?0.6 : y>=1985?0.85 : 1; }
+// budget-fit scope: the largest target sqft whose all-in stays under cap,
+// clamped at the pocket's 85th-pctile sold size (don't out-build the block)
+function pfSolve(price, sqft, rem, addn, f, carryTotal, cap, p85){
+  let t = sqft + Math.max(0, (cap - price - carryTotal - sqft*rem*f) / (addn*f));
+  if(p85) t = Math.min(t, Math.max(p85, sqft));
+  return Math.max(sqft||2200, Math.round(t/50)*50);
+}
 // sold comps sized like the renovation TARGET (±tol, 24 mo, same pocket) — $/sqft
 // falls as homes grow, so exit $/sf must come from similarly-sized sales
 function pfBand(pocket, target){
@@ -406,31 +415,40 @@ function pfQuick(h){
   if(h.type==='lot' || !h.price || !h.sqft) return null;
   const k=focusKey(h);
   if(_pfq.has(k)) return _pfq.get(k);
-  const a=pfAssum(), target=Math.max(2200, Math.round(h.sqft*1.4/50)*50);
-  const band=pfBand(h.pocket,target);
-  const vppsf=band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):0));
+  const a=pfAssum(), f=(1+a.soft/100)*(1+a.cont/100);
+  const rem=Math.round(a.remodel*pfVintage(h.year||1950));
+  const carryTotal=a.months*Math.round(h.price*0.065/12/100)*100;
   let r=null;
-  if(vppsf){
-    const keep=Math.min(h.sqft,target), add=Math.max(0,target-h.sqft);
-    const build=(keep*a.remodel+add*a.addition)*(1+a.soft/100)*(1+a.cont/100);
-    const carry=a.months*Math.round(h.price*0.065/12/100)*100;
-    const allin=h.price+build+carry;
-    const mg=target*vppsf*(1-a.sell/100)-allin;
-    r={mg, pct:Math.round(mg/allin*100)};
+  if(h.price + carryTotal + h.sqft*rem*f > a.cap){
+    r={over:true};
+  } else {
+    const target=pfSolve(h.price, h.sqft, rem, a.addition, f, carryTotal, a.cap, pfP85(h.pocket));
+    const band=pfBand(h.pocket,target);
+    const vppsf=band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):0));
+    if(vppsf){
+      const add=Math.max(0,target-h.sqft);
+      const build=(h.sqft*rem+add*a.addition)*f;
+      const allin=h.price+build+carryTotal;
+      const mg=target*vppsf*(1-a.sell/100)-allin;
+      r={mg, pct:Math.round(mg/allin*100), target};
+    }
   }
   _pfq.set(k,r); return r;
 }
 function pfAssum(){ try{ return {...PF_DEFAULTS, ...JSON.parse(localStorage.getItem('hs_reno_assum')||'{}')}; }catch(e){ return {...PF_DEFAULTS}; } }
 function pfPanel(h){
-  const a=pfAssum(), sqft=h.sqft||0;
-  const target=Math.max(2200, Math.round(sqft*1.4/50)*50);
+  const a=pfAssum(), sqft=h.sqft||0, yr=h.year||1950;
+  const rem=Math.round(a.remodel*pfVintage(yr));
+  const carry=h.price?Math.round(h.price*0.065/12/100)*100:0;
+  const f=(1+a.soft/100)*(1+a.cont/100);
+  const target=pfSolve(h.price||0, sqft, rem, a.addition, f, a.months*carry, a.cap, pfP85(h.pocket));
   const band=pfBand(h.pocket,target);
   const vppsf=band?band.ppsf75:(h.reno_bench || (pocketPpsfMap()[h.pocket]?Math.round(pocketPpsfMap()[h.pocket]*1.15):''));
-  const carry=h.price?Math.round(h.price*0.065/12/100)*100:'';
   const PF_TIPS={
-    buy:'Purchase price. Defaults to asking — set to your expected winning bid (target pockets have cleared ~102% of ask; sitting listings may go under).',
-    target:'Finished size after renovation. Existing sqft gets the remodel rate; every sqft above it is priced as new addition. Check FAR / lot-coverage limits before pushing this — RWC caps how big you can go on a given lot.',
-    remodel:'Cost per sqft to redo the EXISTING footprint. Peninsula 2026: ~$300 cosmetic-heavy refresh → ~$500 down-to-studs with new systems.',
+    buy:'Purchase price. Defaults to asking — set to your expected winning bid (target pockets have cleared ~102% of ask; sitting listings may go under). Target sqft re-solves when you change this.',
+    cap:'Your maximum all-in (buy + build + carry). Target sqft auto-solves to the biggest project that fits under this number.',
+    target:'Finished size after renovation. AUTO = the largest target that keeps all-in under your cap, clamped at the pocket 85th-pctile sold size. Existing sqft gets the remodel rate; sqft above it is priced as addition. Typing here overrides the auto-solve. Check FAR / lot-coverage before trusting a big number.',
+    remodel:'Cost per sqft to redo the EXISTING footprint. Default scales with vintage — ×1 pre-1985 (systems + finishes), ×0.85 1985-2004, ×0.6 2005+ (mostly finishes). Peninsula 2026 base: ~$300 cosmetic → ~$500 down-to-studs.',
     addition:'Cost per NEW sqft added (foundation, framing, roof, everything). Peninsula 2026: ~$600–900; hillside lots and second stories run the high end.',
     cont:'Surprise buffer applied to the whole build. 15% is the floor; use 20%+ on pre-1960 homes (knob-and-tube, galvanized plumbing, foundation unknowns) or anything unpermitted.',
     months:'Design + permits + construction. Realistic: 12–18 months in RWC city; county parcels (Emerald Hills, Selby) permit slower. Big additions trend longer.',
@@ -439,22 +457,33 @@ function pfPanel(h){
     sell:'Cost to exit: agent commission (~4-5%), transfer tax, staging, concessions. ~5.5% is standard; skip only if you plan to hold, not flip.',
     vppsf:'Exit $/sqft. Auto = top-quartile $/sqft of SOLDS SIZED LIKE YOUR TARGET (±20%, 24 mo, this pocket) — size-aware, since big homes exit at lower $/sqft. Recomputes when you change target sqft; typing here overrides and stops the auto-update. Check it against the exit comps listed below.'};
   const inp=(k,lab,v,x)=>`<label title="${PF_TIPS[k]}">${lab} ⓘ<input name="${k}" type="number" value="${v}"${x||''} title="${PF_TIPS[k]}"></label>`;
-  return `<div class="pf" data-sqft="${sqft}" data-pocket="${(h.pocket||'').replace(/"/g,'')}">
-    ${inp('buy','BUY $',h.price||'')}${inp('target','TARGET SQFT',target)}${inp('remodel','REMODEL $/SF',a.remodel)}${inp('addition','ADDITION $/SF',a.addition)}${inp('soft','SOFT %',a.soft)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('sell','SELL %',a.sell)}${inp('vppsf','RENOV. $/SF',vppsf,' data-auto="1"')}
+  return `<div class="pf" data-sqft="${sqft}" data-pocket="${(h.pocket||'').replace(/"/g,'')}" data-year="${yr}">
+    ${inp('buy','BUY $',h.price||'')}${inp('cap','MAX ALL-IN $',a.cap)}${inp('target','TARGET SQFT',target,' data-auto="1"')}${inp('remodel','REMODEL $/SF',rem)}${inp('addition','ADDITION $/SF',a.addition)}${inp('soft','SOFT %',a.soft)}${inp('cont','CONTINGENCY %',a.cont)}${inp('months','MONTHS',a.months)}${inp('carry','CARRY $/MO',carry)}${inp('sell','SELL %',a.sell)}${inp('vppsf','RENOV. $/SF',vppsf,' data-auto="1"')}
     <div class="out"></div>
     <div class="pfcomps"></div>
-    <div class="note">margin is NET of soft + selling costs · bear = exit −8%, build +20%, carry +25% · bull = exit +8% · carry defaults to ~6.5%/yr interest on buy</div>
+    <div class="note">target sqft auto-solves: biggest project under your max all-in, capped at pocket 85th-pctile size · remodel $/sf scales with vintage (×0.6 if 2005+, ×0.85 if 1985+) · margin is NET of soft + selling costs · bear = exit −8%, build +20%, carry +25% · bull = exit +8%</div>
   </div>`;
 }
 function pfRecalc(p){
   const v={}; p.querySelectorAll('input').forEach(i=>v[i.name]=+i.value||0);
-  localStorage.setItem('hs_reno_assum', JSON.stringify({remodel:v.remodel, addition:v.addition, cont:v.cont, months:v.months, soft:v.soft, sell:v.sell}));
+  const sqft=+p.dataset.sqft||0, pocket=p.dataset.pocket, yr=+p.dataset.year||1950;
+  // persist shared assumptions; remodel is vintage-scaled per house, so only
+  // save its base rate if the user actually edited it on this panel
+  const patch={addition:v.addition, cont:v.cont, months:v.months, soft:v.soft, sell:v.sell, cap:v.cap};
+  if(p._ed && p._ed.has('remodel')) patch.remodel=Math.round(v.remodel/pfVintage(yr));
+  localStorage.setItem('hs_reno_assum', JSON.stringify({...pfAssum(), ...patch}));
   _pfq.clear();   // card-face margins use these assumptions too
-  const pocket=p.dataset.pocket, band=pfBand(pocket, v.target);
+  const f=(1+v.soft/100)*(1+v.cont/100), p85=pfP85(pocket);
+  const ti=p.querySelector('input[name=target]');
+  if(ti.dataset.auto==='1'){
+    v.target=pfSolve(v.buy, sqft, v.remodel, v.addition, f, v.months*v.carry, v.cap, p85);
+    ti.value=v.target;
+  }
+  const band=pfBand(pocket, v.target);
   const vi=p.querySelector('input[name=vppsf]');
   if(vi.dataset.auto==='1' && band){ vi.value=band.ppsf75; v.vppsf=band.ppsf75; }
-  const sqft=+p.dataset.sqft||0, keep=Math.min(sqft,v.target), add=Math.max(0,v.target-sqft);
-  const build=(keep*v.remodel + add*v.addition)*(1+v.soft/100)*(1+v.cont/100);
+  const keep=Math.min(sqft,v.target), add=Math.max(0,v.target-sqft);
+  const build=(keep*v.remodel + add*v.addition)*f;
   const carry=v.months*v.carry, allin=v.buy+build+carry, val=v.target*v.vppsf;
   const net=x=>x*(1-v.sell/100), mg=net(val)-allin;
   const bear=net(val*0.92)-(v.buy+build*1.2+carry*1.25), bull=net(val*1.08)-allin;
@@ -466,8 +495,9 @@ function pfRecalc(p){
     `<span title="buy + build + carry — your total cash into the project">all-in<br><b>${fmtK(Math.round(allin))}</b></span>`+
     `<span title="${v.target.toLocaleString()} sf × $${v.vppsf.toLocaleString()}/sf = ${fmtK(Math.round(val))} gross, −${v.sell}% selling costs">net exit<br><b>${fmtK(Math.round(net(val)))}</b></span>`+
     `<span class="mg" title="net exit − all-in, after soft + selling costs. Bear: exit −8%, build +20%, carry +25%. Bull: exit +8%. Aim base ≥10-15%; a positive bull with a negative base is a gamble, not a plan">margin bear·base·bull<br><b style="color:${c}">${F(bear)} · ${F(mg)} (${pct>0?'+':''}${Math.round(pct)}%) · ${F(bull)}</b></span>`;
-  const cd=p.querySelector('.pfcomps'), p85=pfP85(pocket);
-  const warn = p85 && v.target>p85 ? `<span class="warn">⚠ target ${v.target.toLocaleString()} sf &gt; 85th-pctile pocket sale (${p85.toLocaleString()} sf) — biggest-house-on-the-block exits sell at a discount</span><br>` : '';
+  const cd=p.querySelector('.pfcomps');
+  let warn = p85 && v.target>p85 ? `<span class="warn">⚠ target ${v.target.toLocaleString()} sf &gt; 85th-pctile pocket sale (${p85.toLocaleString()} sf) — biggest-house-on-the-block exits sell at a discount</span><br>` : '';
+  if(v.cap && allin>v.cap) warn+=`<span class="warn">⚠ all-in ${fmtK(Math.round(allin))} exceeds your ${fmtK(v.cap)} cap — this house doesn't fit the budget at this scope</span><br>`;
   cd.innerHTML = band
     ? warn+`exit comps (±${Math.round(band.tol*100)}% of target, 24 mo): `+band.band.slice(0,4).map(s=>`<a href="${s.url}" target="_blank" title="sold ${s.sold_date} · ${s.sqft.toLocaleString()} sf">${s.address} ${fmtK(s.price)} · $${s.ppsf.toLocaleString()}/sf</a>`).join('  ·  ')
     : warn+`no size-matched sold comps in this pocket — exit $/sf is a flat fallback; treat the margin with suspicion`;
@@ -481,7 +511,7 @@ function renderFeed(){
   rows.sort((a,b)=>{
     let cmp;
     if (state.sort==='Fixer upside') cmp = ((a.reno_score||0)-(b.reno_score||0)) || ((a.opp_flags||[]).length-(b.opp_flags||[]).length) || (scoreOf(a)-scoreOf(b));
-    else if (state.sort==='Reno margin'){ const qa=pfQuick(a), qb=pfQuick(b); cmp = (qa?qa.mg:-1e12)-(qb?qb.mg:-1e12); }
+    else if (state.sort==='Reno margin'){ const m=q=>(q&&!q.over&&q.mg!=null)?q.mg:-1e12; cmp = m(pfQuick(a))-m(pfQuick(b)); }
     else if (state.sort==='Price') cmp = a.price-b.price;
     else if (state.sort==='Days listed') cmp = (a.dom==null?1e9:a.dom)-(b.dom==null?1e9:b.dom);
     else if (state.sort==='$/sqft') cmp = (a.ppsf==null?1e9:a.ppsf)-(b.ppsf==null?1e9:b.ppsf);
@@ -503,7 +533,9 @@ function renderFeed(){
     const domc = h.dom!=null?` <span class="sm">· ${h.dom} DOM</span>`:'';
     const agree = avmAgree(h)?` <span class="chip up" title="comp model and Realtor AVM agree">✓ confirmed</span>`:'';
     const q=pfQuick(h);
-    const rmc = q?` <span class="win" style="color:${q.pct>=10?'#3c7d54':q.pct>=0?'#a3752a':'#b0472a'}" title="reno pro-forma base margin at your saved assumptions (buy at ask, expand to 1.4×, full remodel) — open 🧮 to adjust scope">· 🔨 ${q.mg<0?'−':'+'}${fmtK(Math.abs(Math.round(q.mg)))}</span>`:'';
+    const rmc = !q?'':(q.over
+      ? ` <span class="win" style="color:var(--faint)" title="doesn't fit your ${fmtK(pfAssum().cap)} all-in cap even without expansion">· 🔨 ✕ cap</span>`
+      : ` <span class="win" style="color:${q.pct>=10?'#3c7d54':q.pct>=0?'#a3752a':'#b0472a'}" title="budget-fit reno at your saved assumptions: buy at ask, renovate + expand to ${q.target.toLocaleString()} sf within your ${fmtK(pfAssum().cap)} all-in cap — open 🧮 to adjust">· 🔨 ${q.mg<0?'−':'+'}${fmtK(Math.abs(Math.round(q.mg)))}</span>`);
     const pm=pocketPpsfMap(); const bench = pm[h.pocket] || (h.expected_price&&h.sqft?Math.round(h.expected_price/h.sqft):null);
     const benchSrc = pm[h.pocket] ? 'area' : 'comps';
     let ppsfHtml='';
@@ -530,7 +562,8 @@ function renderFeed(){
     renderFeed();
   });
   document.querySelectorAll('#feed .pf').forEach(p=>{
-    p.querySelectorAll('input').forEach(i=>i.oninput=()=>{ if(i.name==='vppsf') i.dataset.auto='0'; pfRecalc(p); });
+    p._ed=new Set();
+    p.querySelectorAll('input').forEach(i=>i.oninput=()=>{ p._ed.add(i.name); if(i.name==='vppsf'||i.name==='target') i.dataset.auto='0'; pfRecalc(p); });
     pfRecalc(p);
   });
 }

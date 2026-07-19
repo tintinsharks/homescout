@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="5030353fb3bb855734ed688acbaefe7e">
+<meta name="build" content="1e07be6cada4fc8c1d8dc9ba1d66958d">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -101,6 +101,7 @@
   .chip.oh { background:#dce8f5; color:#2a5f9e; } .chip.cut { background:#f6e3cf; color:#9a6a1e; }
   .chip.newu { background:var(--accent); color:#fff; } .chip.newl { background:#dcf0e2; color:#2f7d4f; }
   .chip.lay-c { background:#e7ded1; color:#7a5b34; } .chip.lay-i { background:#efe9df; color:#9a8a70; } .chip.lay-o { background:#e4ece4; color:#5f7a5f; }
+  .chip.sch-g { background:#dcefe0; color:#2f7d4f; } .chip.sch-w { background:#f6ddd6; color:#b0472a; }
   .fmeta { display:flex; align-items:baseline; gap:6px 14px; flex-wrap:wrap; font-variant-numeric:tabular-nums; }
   .fmeta .spec { font-size:12px; color:#4a3f31; white-space:nowrap; }
   .fmeta .money { margin-left:auto; text-align:right; }
@@ -378,6 +379,43 @@ function pfLayout(h){
 const PF_OPENABLE={closed:1,'likely-closed':1,partial:1};
 function pfIsOpenable(h){ return h.type!=='lot' && !!PF_OPENABLE[pfLayout(h)]; }
 
+// --- school signal (district tier): a permanent value driver, not renovatable.
+// District-level approximation grounded in stable public ratings — only the
+// exceptions (top / weak) surface as chips; the mixed baseline stays silent.
+// Tiers ~ GreatSchools /10: strong 8-10, mixed 4-7, weak 1-3.
+const SCHOOL_DISTRICTS = {
+  lomitas:   {tier:'strong', name:'Las Lomitas Elem',        r:'~9–10/10'},
+  mpcsd:     {tier:'strong', name:'Menlo Park City Elem',    r:'~9/10'},
+  belmont:   {tier:'strong', name:'Belmont-Redwood Shores',  r:'~8/10'},
+  woodside:  {tier:'strong', name:'Woodside Elem',           r:'~9/10'},
+  portola:   {tier:'strong', name:'Portola Valley Elem',     r:'~9/10'},
+  hillsboro: {tier:'strong', name:'Hillsborough City Elem',  r:'~9/10'},
+  sancarlos: {tier:'strong', name:'San Carlos Elem',         r:'~8/10'},
+  paloalto:  {tier:'strong', name:'Palo Alto Unified',       r:'~9/10'},
+  roycloud:  {tier:'strong', name:'Roy Cloud K-8 (RCSD)',    r:'~8/10'},
+  rcsd:      {tier:'mixed',  name:'Redwood City Elem',        r:'~4–6/10, school-dependent'},
+  smfc:      {tier:'mixed',  name:'San Mateo-Foster City',    r:'~5–7/10'},
+  ravenswood:{tier:'weak',   name:'Ravenswood City Elem',     r:'~2–3/10'},
+};
+// pocket → district key (only pockets I'm confident about; others → no signal)
+const POCKET_SCHOOL = {
+  'Redwood Shores':'belmont', 'Emerald Hills (county)':'roycloud',
+  'Woodside Plaza':'rcsd','Roosevelt':'rcsd','Mount Carmel':'rcsd','Redwood Oaks':'rcsd',
+  'Eagle Hill':'rcsd','Central':'rcsd','Canyon':'rcsd','Edgewood Park':'rcsd','Palm Park':'rcsd',
+  'Farm Hills':'rcsd','Friendly Acres':'rcsd','Stambaugh-Heller':'rcsd','Selby-Atherwood (county)':'rcsd',
+  'West Menlo (county)':'lomitas','Atherton':'mpcsd','Woodside':'woodside','Portola Valley':'portola',
+  'Belmont':'belmont','San Carlos':'sancarlos','Hillsborough':'hillsboro','Palo Alto':'paloalto',
+  'San Mateo':'smfc','Foster City':'smfc','East Palo Alto':'ravenswood',
+};
+function pfSchool(h){
+  let key = POCKET_SCHOOL[h.pocket];
+  // Menlo Park pocket straddles two districts: strong Menlo Park City, except
+  // Belle Haven (NE, east of US-101) which is weak Ravenswood.
+  if (h.pocket==='Menlo Park')
+    key = (h.lat>37.47 && h.lat<37.492 && h.lon>-122.158 && h.lon<-122.135) ? 'ravenswood' : 'mpcsd';
+  return key ? {...SCHOOL_DISTRICTS[key], key} : null;
+}
+
 // --- plain-English verdict: one scannable line per house, no inputs to fiddle -
 // Keep-footprint open-up framing (live-in lens, no resale cost): does the done
 // home comfortably out-value what you put in? Rate = all-in $/sf to reach a
@@ -425,6 +463,9 @@ function chipsFor(h){
   if (/Bair Island|Shores/.test(h.pocket||'')) s+='<span class="chip wet">🌿 wetland</span>';
   const cut=priceCut(h); if (cut) s+=`<span class="chip cut" title="price reduced — possibly motivated seller">▼ cut ${fmtK(cut)}</span>`;
   if (h.open_house) s+='<span class="chip oh" title="open house scheduled — tour it">📅 open</span>';
+  const sc=pfSchool(h);   // only flag the exceptions — top schools (a plus) or weak (a permanent-discount penalty)
+  if (sc && sc.tier==='strong') s+=`<span class="chip sch-g" title="${sc.name} — ${sc.r} (district-level; verify the assigned school on tour)">🎓 top schools</span>`;
+  else if (sc && sc.tier==='weak') s+=`<span class="chip sch-w" title="${sc.name} — ${sc.r} (district-level; a permanent, non-renovatable discount driver — verify on tour)">🎓 weak schools</span>`;
   if (isNewToYou(h)) s='<span class="chip newu" title="appeared since your last visit">🆕 new</span>'+s;
   return s;
 }

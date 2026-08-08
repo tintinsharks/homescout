@@ -12,6 +12,7 @@ gem-scored against the full combined comp pool.
 """
 
 import json
+import os
 import sys
 import threading
 from datetime import datetime, timezone
@@ -228,3 +229,10 @@ def main():
 
 if __name__ == "__main__":
     main()
+    # HomeHarvest's ThreadPoolExecutor workers are non-daemon: if a timed-out
+    # scrape was abandoned, concurrent.futures' atexit hook joins its hung
+    # workers forever (froze the 2026-08-07 run for 17h). Skip interpreter
+    # shutdown entirely — everything is already written and printed.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

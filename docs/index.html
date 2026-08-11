@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="1e07be6cada4fc8c1d8dc9ba1d66958d">
+<meta name="build" content="b6e5035d8c882a046abc5589a6e64ff8">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -108,6 +108,7 @@
   .fmeta .money .price, .fmeta .money .win { white-space:nowrap; }
   .fmeta .price { font-size:16px; font-weight:700; } .fmeta .sm { font-size:11px; color:var(--muted); }
   .fmeta .win { font-size:11px; font-weight:700; color:var(--accent); }
+  .fmeta .mo { font-size:12.5px; font-weight:700; color:var(--ink2); white-space:nowrap; cursor:help; }
   .verdict { display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; margin:1px 0 2px; font-size:12.5px; line-height:1.5; }
   .verdict .vlab { color:#fff; font-weight:800; font-size:10.5px; letter-spacing:.04em; border-radius:6px; padding:2px 8px; white-space:nowrap; }
   .verdict .vline { color:var(--ink); font-weight:600; }
@@ -172,6 +173,10 @@
       <div class="miniinputs">
         <label>MIN SQFT<input type="number" id="fSqft" value="900" step="100"></label>
         <label>BUILT ≥<input type="number" id="fYearMin" placeholder="any" step="1"></label>
+      </div>
+      <div class="miniinputs" title="drives the ≈$/mo all-in ownership estimate on each card">
+        <label>DOWN $<input type="number" id="fDown" value="500000" step="50000"></label>
+        <label>RATE %<input type="number" id="fRate" value="6.375" step="0.125"></label>
       </div>
       <div class="togs">
         <button class="tog" id="chipNew">🆕 New since last visit</button>
@@ -480,6 +485,17 @@ function pocketPpsfMap(){
   for(const p in by) if(by[p].length>=4) _pocketPpsf[p]=Math.round(median(by[p]));
   return _pocketPpsf;
 }
+// All-in monthly ownership cost (buy-to-live): amortized P&I + 1.2% CA property tax
+// + ~0.15%/yr insurance + HOA. Down $ and rate come from the rail inputs.
+function monthlyCost(h){
+  if(!h.price || h.type==='lot') return null;
+  const down=+($('fDown').value||0), r=(+($('fRate').value||6.375))/100/12, n=360;
+  const loan=Math.max(0, h.price-down);
+  const pi = r>0 ? loan*r*Math.pow(1+r,n)/(Math.pow(1+r,n)-1) : loan/n;
+  const tax=h.price*0.012/12, ins=h.price*0.0015/12, hoa=h.hoa||0;
+  return {total:Math.round(pi+tax+ins+hoa), pi:Math.round(pi), tax:Math.round(tax), ins:Math.round(ins), hoa:Math.round(hoa)};
+}
+const fmtMo = n => n>=10000 ? '$'+(n/1000).toFixed(1)+'k/mo' : '$'+(Math.round(n/10)*10).toLocaleString()+'/mo';
 
 // --- reno pro-forma: all-in cost vs renovated value, inline per card --------
 const PF_DEFAULTS = { remodel:400, addition:750, cont:15, months:12, soft:12, sell:5.5, cap:3500000 };
@@ -666,7 +682,7 @@ function renderFeed(){
         <div class="fhead"><a class="addr" href="${h.url}" target="_blank">${addr(h)}</a><span class="pk">${h.pocket||''}</span>${ppsfHtml}<span class="st" style="background:${stc}" title="${h.status||''}"></span></div>
         <div class="chips">${chipsFor(h)}</div>
         ${vd?`<div class="verdict"><span class="vlab" style="background:${vd.c}">${vd.ic} ${vd.lab}</span> <span class="vline">${vd.line}</span> <span class="vr">${vd.reason}</span></div>`:''}
-        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask</span>${domc} ${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}" title="adjust the estimate (buy price, scope, exit) if you want to tinker">🧮 numbers</button>`:''}</span></div>
+        <div class="fmeta"><span class="spec">${specs}</span><span class="money"><span class="price">${fmt$(h.price)}</span> <span class="sm">ask</span>${(()=>{const mc=monthlyCost(h);return mc?` <span class="mo" title="≈ ${fmtMo(mc.total)} all-in to own · P&I ${fmtMo(mc.pi)} · tax ${fmtMo(mc.tax)} · ins ${fmtMo(mc.ins)}${mc.hoa?' · HOA $'+mc.hoa.toLocaleString()+'/mo':''}  (down $${(+$('fDown').value).toLocaleString()}, ${$('fRate').value}%, 30yr, 1.2% tax)">≈ ${fmtMo(mc.total)}</span>`:'';})()}${domc} ${h.type!=='lot'&&h.price?`<button class="pfbtn${state.proOpen.has(focusKey(h))?' on':''}" data-k="${encodeURIComponent(focusKey(h))}" title="adjust the estimate (buy price, scope, exit) if you want to tinker">🧮 numbers</button>`:''}</span></div>
         ${state.proOpen.has(focusKey(h))?pfPanel(h):''}
       </div>
       <span class="star${fav?' on':''}" data-k="${encodeURIComponent(focusKey(h))}">${fav?'★':'☆'}</span>
@@ -801,7 +817,8 @@ function saveFilters(){
     region:state.region, sort:state.sort, sortDir:state.sortDir, minBeds:state.minBeds,
     targetsOnly:state.targetsOnly, fixerOnly:state.fixerOnly, openOnly:state.openOnly, avoidHaz:state.avoidHaz, showPending:state.showPending, showLots:state.showLots,
     pockets:[...state.pockets], areaExpanded:[...state.areaExpanded],
-    fMin:$('fMin').value, fPrice:$('fPrice').value, fSqft:$('fSqft').value, fYearMin:$('fYearMin').value, fMinScore:$('fMinScore').value
+    fMin:$('fMin').value, fPrice:$('fPrice').value, fSqft:$('fSqft').value, fYearMin:$('fYearMin').value, fMinScore:$('fMinScore').value,
+    fDown:$('fDown').value, fRate:$('fRate').value
   })); }catch(e){}
 }
 function restoreFilters(){
@@ -815,7 +832,7 @@ function restoreFilters(){
   if(f.showLots!=null) state.showLots=!!f.showLots;
   if(Array.isArray(f.pockets)) state.pockets=new Set(f.pockets);
   if(Array.isArray(f.areaExpanded)) state.areaExpanded=new Set(f.areaExpanded);
-  ['fMin','fPrice','fSqft','fYearMin','fMinScore'].forEach(k=>{ if(f[k]!=null) $(k).value=f[k]; });
+  ['fMin','fPrice','fSqft','fYearMin','fMinScore','fDown','fRate'].forEach(k=>{ if(f[k]!=null) $(k).value=f[k]; });
 }
 const BUILD = document.querySelector('meta[name=build]')?.content || 'dev';
 async function checkVersion(){   // reload once if a newer page has deployed (beats stale browser/CDN cache)
@@ -859,7 +876,7 @@ $('chipOpen').onclick=()=>{state.openOnly=!state.openOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};
 $('chipPending').onclick=()=>{state.showPending=!state.showPending;renderAll();};
 $('chipLots').onclick=()=>{state.showLots=!state.showLots;renderAll();};
-['fMin','fPrice','fSqft','fYearMin','fMinScore'].forEach(id=>$(id).oninput=renderAll);
+['fMin','fPrice','fSqft','fYearMin','fMinScore','fDown','fRate'].forEach(id=>$(id).oninput=renderAll);
 $('mktScope').onchange=renderMarket; $('tRange').onchange=renderCharts;
 restoreFilters();
 load();

@@ -13,11 +13,40 @@ import re
 import sys
 from pathlib import Path
 
+import threading
+import time
+
 import pandas as pd
 from homeharvest import scrape_property
 
 ROOT = Path(__file__).resolve().parent
 DATA_FILE = ROOT / "docs" / "data.json"
+SCRAPE_TIMEOUT = 90
+
+
+def scrape_safe(attempts=2, **kwargs):
+    """scrape_property with a hard timeout + retry — a hung Realtor connection
+    here previously blocked the whole pipeline indefinitely."""
+    last = None
+    for a in range(attempts):
+        box = {}
+        def run():
+            try:
+                box["df"] = scrape_property(**kwargs)
+            except Exception as e:      # noqa: BLE001
+                box["err"] = e
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(SCRAPE_TIMEOUT)
+        if t.is_alive():
+            last = TimeoutError(f"scrape exceeded {SCRAPE_TIMEOUT}s")
+        elif "err" in box:
+            last = box["err"]
+        else:
+            return box.get("df")
+        if a < attempts - 1:
+            time.sleep(15)
+    raise last
 
 OPP_KEYWORDS = [
     "fixer", "tlc", "as-is", "as is", "probate", "estate sale", "trust sale",
@@ -49,7 +78,7 @@ def main():
     for loc in ("Redwood City, CA", "Menlo Park, CA", "Atherton, CA"):
         for lt in ("for_sale", "pending"):
             try:
-                df = scrape_property(location=loc,
+                df = scrape_safe(location=loc,
                                      listing_type=lt, property_type=["single_family"])
                 frames.append(df)
                 print(f"realtor.com {loc} {lt}: {len(df)} rows")
@@ -103,7 +132,7 @@ def main():
         skey = {}
         n = 0
         for loc in ("Redwood City, CA", "Menlo Park, CA", "Atherton, CA"):
-            sdf = scrape_property(location=loc, listing_type="sold",
+            sdf = scrape_safe(location=loc, listing_type="sold",
                                   property_type=["single_family"], past_days=365)
             print(f"realtor.com {loc} sold: {len(sdf)} rows")
             for _, r in sdf.iterrows():

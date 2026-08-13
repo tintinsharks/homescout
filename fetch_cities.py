@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -29,7 +30,7 @@ DATA_FILE = fd.DOCS / "data.json"
 # stalled ~7h, blocking every scheduled run behind it). Run each call in a
 # daemon thread and abandon it past this many seconds — the caller's except
 # block then skips that city and continues. Normal calls finish in seconds.
-SCRAPE_TIMEOUT = 180
+SCRAPE_TIMEOUT = 60
 
 
 def scrape_property_timeout(**kwargs):
@@ -50,6 +51,20 @@ def scrape_property_timeout(**kwargs):
     if "err" in box:
         raise box["err"]
     return box.get("df")
+
+
+def scrape_retry(attempts=3, **kwargs):
+    """Retry scrape_property_timeout with backoff — Realtor rate-limits our
+    rapid multi-city sweep and returns transient ConnectionError/RetryError."""
+    last = None
+    for a in range(attempts):
+        try:
+            return scrape_property_timeout(**kwargs)
+        except Exception as e:      # noqa: BLE001
+            last = e
+            if a < attempts - 1:
+                time.sleep(20 * (a + 1))   # 20s, 40s — let the rate limit clear
+    raise last
 # (location, pocket name or None to classify by polygon, also fetch solds?)
 # The core three cities are covered by Redfin for solds, but their ACTIVES are
 # pulled here too: Redfin's CSV endpoint omits some MLS listings by rule, so
@@ -160,14 +175,18 @@ def main():
     hoods = fd.load_neighborhoods()
     limits = fd.load_city_limits()
     eb_active, eb_sold = [], []
+    failed_pockets = set()          # pockets whose for-sale home fetch failed
     for loc, pocket, want_solds in CITIES:
+        home_failed = home_got = False
         for lt in ("for_sale", "pending"):
             for ptype, typ in (("single_family", "home"), ("land", "lot")):
                 try:
-                    df = scrape_property_timeout(location=loc, listing_type=lt,
-                                                 property_type=[ptype])
+                    df = scrape_retry(location=loc, listing_type=lt,
+                                      property_type=[ptype])
                 except Exception as e:
                     print(f"{loc} {lt} {ptype} failed: {e}", file=sys.stderr)
+                    if lt == "for_sale" and ptype == "single_family":
+                        home_failed = True
                     continue
                 for _, r in df.iterrows():
                     h = row_from(r, pocket, hoods, limits)
@@ -176,12 +195,17 @@ def main():
                     h["type"] = typ
                     enrich_active(h, r)
                     eb_active.append(h)
+                    if typ == "home":
+                        home_got = True
                 print(f"{loc} {lt} {ptype}: {len(df)} rows")
+        if pocket and home_failed and not home_got:
+            failed_pockets.add(pocket)
+        time.sleep(3)              # be polite between cities → fewer rate-limit failures
         if not want_solds:     # core cities: Redfin already provides solds
             continue
         try:
-            df = scrape_property_timeout(location=loc, listing_type="sold",
-                                         property_type=["single_family"], past_days=SOLD_DAYS)
+            df = scrape_retry(location=loc, listing_type="sold",
+                              property_type=["single_family"], past_days=SOLD_DAYS)
         except Exception as e:
             print(f"{loc} sold failed: {e}", file=sys.stderr)
             continue
@@ -209,6 +233,24 @@ def main():
     # spillover and the per-city pull — Redfin rows were added first and win)
     def key(h):
         return h["mls"] or (h["address"].upper(), h["zip"])
+
+    # carry forward last-good listings for any city whose fetch failed this run,
+    # so a transient Realtor error never makes its listings disappear.
+    carried = 0
+    if failed_pockets:
+        try:
+            prev = json.loads((fd.DOCS / "data.prev.json").read_text()).get("active", [])
+        except Exception:
+            prev = []
+        have_eb = {key(h) for h in eb_active}
+        for h in prev:
+            if h.get("pocket") in failed_pockets and not h.get("sold_date") and key(h) not in have_eb:
+                h["stale"] = True          # flag: not refreshed this run
+                eb_active.append(h)
+                have_eb.add(key(h))
+                carried += 1
+        print(f"carried forward {carried} listings for failed cities: "
+              f"{sorted(failed_pockets)}", file=sys.stderr)
 
     have_a = {key(h) for h in data["active"]}
     new_active = [h for h in {key(h): h for h in eb_active}.values() if key(h) not in have_a]

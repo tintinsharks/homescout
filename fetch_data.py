@@ -416,6 +416,9 @@ def main():
     if prev_path.exists():
         try:
             prev_active = json.loads(prev_path.read_text()).get("active", [])
+            # keep the FULL prior snapshot so fetch_cities can carry forward any
+            # city whose Realtor fetch fails this run (else its listings vanish).
+            (DOCS / "data.prev.json").write_text(prev_path.read_text())
         except Exception:
             pass
 

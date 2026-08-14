@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="fe69abffc5ecf78f1d9433b6db996af7">
+<meta name="build" content="24ccb7db97367b7b465bafbee9a61aed">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -833,8 +833,10 @@ function renderHeat(){
   (DATA?DATA.active:[]).forEach(h=>{ if(/pending|contingent/i.test(h.status||''))return; act[h.pocket]=(act[h.pocket]||0)+1; if((dealScore(h)||0)>=8) gem[h.pocket]=(gem[h.pocket]||0)+1; });
   const targets=new Set(DATA?DATA.target_pockets:[]);
   let rows=Object.entries(H).map(([pk,d])=>Object.assign({pk,act:act[pk]||0,gem:gem[pk]||0,tgt:targets.has(pk)},d));
+  if(state.pockets.size) rows=rows.filter(d=>state.pockets.has(d.pk));   // mirror the AREAS selection
   const dir = state.heatSort==='deal' ? -1 : 1;                 // hot → hottest first, deal → coldest first
   rows.sort((a,b)=>dir*((b.temp??-1)-(a.temp??-1)) || (b.tgt-a.tgt) || (b.act-a.act));
+  if(!rows.length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">No 12-month sold data for the selected area — clear or change the AREAS filter on the left.</div>'; note.textContent=''; return; }
   grid.innerHTML = rows.map(d=>{
     const col=tempColor(d.temp);
     const sel = state.pockets.size===1 && state.pockets.has(d.pk);
@@ -856,8 +858,8 @@ function renderHeat(){
   }).join('');
   grid.querySelectorAll('.hcell').forEach(el=>el.onclick=()=>{
     const pk=decodeURIComponent(el.dataset.pk);
-    if(state.pockets.size===1 && state.pockets.has(pk)){ state.pockets.clear(); }
-    else { state.pockets.clear(); state.pockets.add(pk); state.region=''; }
+    state.region='';
+    if(state.pockets.has(pk)) state.pockets.delete(pk); else state.pockets.add(pk);  // toggle
     renderAll();
     document.getElementById('feed').scrollIntoView({behavior:'smooth',block:'start'});
   });

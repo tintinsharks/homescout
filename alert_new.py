@@ -84,7 +84,7 @@ def deal_score(h):
     return round(min(g, a) * 0.6 + max(g, a) * 0.4)
 
 
-def card_html(h):
+def card_html(h, note=""):
     ds = deal_score(h)
     specs = " · ".join(filter(None, [
         f"{int(h['beds'])} bd" if h.get("beds") else None,
@@ -107,6 +107,8 @@ def card_html(h):
     photo = h.get("photo") or ""
     img = (f'<img src="{photo}" width="150" height="105" '
            f'style="object-fit:cover;border-radius:8px;display:block" alt="">' if photo else "")
+    note_html = (f'<div style="font-size:13px;font-weight:700;color:#2f7d43;margin-top:3px">{note}</div>'
+                 if note else "")
     return f"""
     <tr>
       <td style="padding:12px 0;border-bottom:1px solid #eee;vertical-align:top;width:160px">{img}</td>
@@ -117,42 +119,67 @@ def card_html(h):
           <a href="{h.get('url', DASH)}" style="color:#2a2018;text-decoration:none">{h.get('address', '')}</a></div>
         <div style="font-size:13px;color:#6b5e4e">{h.get('city', '')} · {h.get('pocket', '')}</div>
         <div style="font-size:13px;color:#6b5e4e;margin-top:2px">{specs}</div>
+        {note_html}
         <div style="margin-top:6px">{' '.join(badges)}</div>
       </td>
     </tr>"""
 
 
-def build_email(new, cfg):
+def _section(title, items):
+    """items: list of (home, note_str). Returns an HTML block or ''."""
+    if not items:
+        return ""
+    rows = "".join(card_html(h, note) for h, note in items)
+    return (f'<div style="font-size:17px;font-weight:700;font-family:Georgia,serif;'
+            f'margin:18px 0 4px">{title}</div>'
+            f'<table style="width:100%;border-collapse:collapse">{rows}</table>')
+
+
+def build_digest(new, cuts, stale, cfg):
+    """new: [home]; cuts/stale: [(home, note)]. One combined email."""
     new.sort(key=lambda h: (not h.get("target"), -((deal_score(h) or -99)), h.get("price") or 0))
-    n = len(new)
-    tgt = sum(1 for h in new if h.get("target"))
-    sub = f"🏡 HomeScout: {n} new listing{'s' if n != 1 else ''}"
-    if tgt:
-        sub += f" ({tgt} in your target pockets)"
-    rows = "".join(card_html(h) for h in new)
+    parts = []
+    if new:
+        parts.append(f"{len(new)} new")
+    if cuts:
+        parts.append(f"{len(cuts)} price cut{'s' if len(cuts) != 1 else ''}")
+    if stale:
+        parts.append(f"{len(stale)} sitting")
+    sub = "🏡 HomeScout: " + ", ".join(parts)
+    body = (_section(f"🆕 New listings ({len(new)})", [(h, "") for h in new])
+            + _section(f"📉 Price cuts ({len(cuts)})", cuts)
+            + _section(f"⏳ Been sitting ({len(stale)})", stale))
     html = f"""<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:640px;margin:0 auto;color:#2a2018">
-      <div style="font-size:22px;font-weight:700;font-family:Georgia,serif">🏡 HomeScout — {n} new listing{'s' if n != 1 else ''}</div>
-      <div style="font-size:13px;color:#6b5e4e;margin:4px 0 14px">
-        Appeared since the last refresh · {datetime.now().strftime('%A %b %-d, %-I:%M %p')} ·
+      <div style="font-size:22px;font-weight:700;font-family:Georgia,serif">🏡 HomeScout update</div>
+      <div style="font-size:13px;color:#6b5e4e;margin:4px 0 6px">
+        {datetime.now().strftime('%A %b %-d, %-I:%M %p')} ·
         <a href="{DASH}" style="color:#c0392b">open the dashboard →</a></div>
-      <table style="width:100%;border-collapse:collapse">{rows}</table>
+      {body}
       <div style="font-size:11px;color:#a89b86;margin-top:16px;line-height:1.5">
-        Auto-sent by HomeScout when new for-sale listings hit the feed. Gates: ≤ {fmt_price(cfg.get('max_price'))},
-        {cfg.get('min_sqft', 0):,}+ sqft (target pockets always included). Reply to Nitin to tune.</div>
+        Redwood City / Menlo Park / Atherton · ≤ {fmt_price(cfg.get('max_price'))},
+        {cfg.get('min_sqft', 0):,}+ sqft (target pockets always included).
+        Price cuts ≥ {cfg.get('min_cut_pct', 1)}%; "sitting" = {cfg.get('stale_days', 45)}+ days listed.</div>
     </div>"""
     return sub, html
 
 
-def build_sms(new):
-    """Short plain-text summary for SMS gateways (carriers truncate ~160 chars,
-    so keep it tight and ASCII — no emoji/HTML)."""
-    n = len(new)
-    lines = [f"HomeScout: {n} new listing{'s' if n != 1 else ''}"]
-    for h in new[:3]:
+def build_sms_digest(new, cuts, stale):
+    """Compact ASCII summary for SMS gateways."""
+    head = []
+    if new:
+        head.append(f"{len(new)} new")
+    if cuts:
+        head.append(f"{len(cuts)} cut{'s' if len(cuts) != 1 else ''}")
+    if stale:
+        head.append(f"{len(stale)} sitting")
+    lines = ["HomeScout: " + ", ".join(head)]
+    for h in new[:2]:
         tag = "*" if h.get("target") else "-"
-        lines.append(f"{tag} {fmt_price(h.get('price'))} {h.get('address', '')}")
-    if n > 3:
-        lines.append(f"+{n - 3} more")
+        lines.append(f"{tag} NEW {fmt_price(h.get('price'))} {h.get('address', '')}")
+    for h, note in cuts[:2]:
+        lines.append(f"v CUT {fmt_price(h.get('price'))} {h.get('address', '')}")
+    for h, note in stale[:1]:
+        lines.append(f". SIT {fmt_price(h.get('price'))} {h.get('address', '')}")
     lines.append(DASH)          # full https:// URL so SMS auto-linkers keep the /homescout path
     return "\n".join(lines)
 
@@ -265,6 +292,7 @@ def main():
         return
 
     prev_keys = {listing_key(h) for h in prev.get("active", [])}
+    prev_by_key = {listing_key(h): h for h in prev.get("active", [])}
     seen = set(ledger) | prev_keys
     new = [h for h in active if listing_key(h) not in seen and passes_gate(h, cfg)]
 
@@ -276,41 +304,61 @@ def main():
     ledger = {k: d for k, d in ledger.items() if d >= cutoff or k in cur_keys}
     LEDGER.write_text(json.dumps(ledger))
 
-    if not new:
-        print("no new listings this run")
+    # --- price cuts & newly-stale, diffed against last run's snapshot ---
+    # Both fire once (prev==current on the next run) and only for listings that
+    # existed last run, so new listings never double-count and there's no backlog blast.
+    min_cut_pct = cfg.get("min_cut_pct", 1.0)
+    min_cut_abs = cfg.get("min_cut_abs", 20000)
+    stale_days = cfg.get("stale_days", 45)
+    cuts, stale = [], []
+    for h in active:
+        k = listing_key(h)
+        p = prev_by_key.get(k)
+        if not p or not passes_gate(h, cfg):
+            continue
+        op, np = p.get("price"), h.get("price")
+        if op and np and op > np:
+            drop, pct = op - np, (op - np) / op * 100
+            if pct >= min_cut_pct and drop >= min_cut_abs:
+                cuts.append((h, f"📉 Cut {fmt_price(drop)} ({pct:.0f}%) — was {fmt_price(op)}"))
+                continue                                   # a cut this run isn't also "newly stale"
+        pd, cd = p.get("dom"), h.get("dom")
+        if cd and 0 < cd <= 365 and pd is not None and pd < stale_days <= cd:
+            stale.append((h, f"⏳ Now {cd} days on market — no longer fresh"))
+
+    if not (new or cuts or stale):
+        print("nothing to alert this run")
         return
-    new.sort(key=lambda h: (not h.get("target"), -((deal_score(h) or -99)), h.get("price") or 0))
 
     # dead-man's alarm: if the Gmail token has lapsed, both email and SMS-gateway
     # are down — warn via Signal (token-independent) instead of failing silently.
     uses_gmail = bool(recipients) or bool([a for a in cfg.get("sms_recipients", []) if a])
     if uses_gmail and not gmail_ok():
-        signal_note(f"⚠️ HomeScout: Gmail token expired — email + text alerts are DOWN "
-                    f"({len(new)} new listing(s) not sent). Re-authorize and Publish the OAuth app.")
+        signal_note("⚠️ HomeScout: Gmail token expired — email + text alerts are DOWN "
+                    f"({len(new)} new / {len(cuts)} cuts / {len(stale)} sitting not sent). "
+                    "Re-authorize and Publish the OAuth app.")
         print("gmail token unusable; sent Signal warning, skipping email/SMS", file=sys.stderr)
         recipients = []
         cfg = {**cfg, "sms_recipients": []}
 
+    summary = f"{len(new)} new / {len(cuts)} cuts / {len(stale)} sitting"
     if recipients:
-        sub, html = build_email(new, cfg)
+        sub, html = build_digest(new, cuts, stale, cfg)
         try:
             send(sub, html, recipients)
-            print(f"emailed {len(new)} new listings to {', '.join(recipients)}")
+            print(f"emailed [{summary}] to {', '.join(recipients)}")
         except Exception as e:
             print(f"email send failed: {e}", file=sys.stderr)
-    else:
-        print(f"{len(new)} new listings but no email recipients configured", file=sys.stderr)
 
+    sms_text = build_sms_digest(new, cuts, stale)
     sig_nums = [n for n in cfg.get("signal_recipients", []) if n]
     if sig_nums:
-        sent = send_signal(build_sms(new), sig_nums)
-        print(f"texted {len(new)} via Signal to {', '.join(sent) or '(none)'}")
-
+        send_signal(sms_text, sig_nums)
     sms_addrs = [a for a in cfg.get("sms_recipients", []) if a and "@" in a]
     if sms_addrs:
         try:
-            sent = send_sms_email(build_sms(new), sms_addrs)
-            print(f"SMS {len(new)} new listings to {', '.join(sent) or '(none)'}")
+            sent = send_sms_email(sms_text, sms_addrs)
+            print(f"SMS [{summary}] to {', '.join(sent) or '(none)'}")
         except Exception as e:
             print(f"sms send failed: {e}", file=sys.stderr)
 

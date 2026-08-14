@@ -143,6 +143,35 @@ def build_email(new, cfg):
     return sub, html
 
 
+def build_sms(new):
+    """Short plain-text summary for Signal/SMS (keep it compact)."""
+    n = len(new)
+    lines = [f"🏡 HomeScout: {n} new listing{'s' if n != 1 else ''}"]
+    for h in new[:5]:
+        tag = "🎯" if h.get("target") else "•"
+        lines.append(f"{tag} {fmt_price(h.get('price'))} {h.get('address', '')} ({h.get('pocket', '')})")
+    if n > 5:
+        lines.append(f"…+{n - 5} more")
+    lines.append(DASH)
+    return "\n".join(lines)
+
+
+def send_signal(text, numbers):
+    """Text via signal-cli (already linked). Each number is a separate send so
+    one bad number doesn't drop the rest."""
+    import subprocess
+    sig = "/opt/homebrew/bin/signal-cli"
+    sent = []
+    for num in numbers:
+        try:
+            subprocess.run([sig, "send", "-m", text, num], check=True,
+                           capture_output=True, timeout=60)
+            sent.append(num)
+        except Exception as e:
+            print(f"signal send to {num} failed: {e}", file=sys.stderr)
+    return sent
+
+
 def send(sub, html, recipients):
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -195,16 +224,22 @@ def main():
     if not new:
         print("no new listings this run")
         return
-    if not recipients:
-        print(f"{len(new)} new listings but no recipients configured; not sending", file=sys.stderr)
-        return
-    sub, html = build_email(new, cfg)
-    try:
-        send(sub, html, recipients)
-        print(f"emailed {len(new)} new listings to {', '.join(recipients)}")
-    except Exception as e:
-        print(f"send failed: {e}", file=sys.stderr)
-        sys.exit(0)   # never break the refresh
+    new.sort(key=lambda h: (not h.get("target"), -((deal_score(h) or -99)), h.get("price") or 0))
+
+    if recipients:
+        sub, html = build_email(new, cfg)
+        try:
+            send(sub, html, recipients)
+            print(f"emailed {len(new)} new listings to {', '.join(recipients)}")
+        except Exception as e:
+            print(f"email send failed: {e}", file=sys.stderr)
+    else:
+        print(f"{len(new)} new listings but no email recipients configured", file=sys.stderr)
+
+    sms_nums = [n for n in cfg.get("signal_recipients", []) if n]
+    if sms_nums:
+        sent = send_signal(build_sms(new), sms_nums)
+        print(f"texted {len(new)} new listings via Signal to {', '.join(sent) or '(none)'}")
 
 
 if __name__ == "__main__":

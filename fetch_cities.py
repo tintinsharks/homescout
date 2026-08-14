@@ -72,8 +72,6 @@ def scrape_retry(attempts=3, **kwargs):
 CITIES = [
     ("Redwood City, CA", None, False), ("Menlo Park, CA", None, False),
     ("Atherton, CA", None, False),
-    # East Bay
-    ("Fremont, CA", "Fremont", True), ("Union City, CA", "Union City", True),
     # Peninsula
     ("San Carlos, CA", "San Carlos", True), ("Belmont, CA", "Belmont", True),
     ("San Mateo, CA", "San Mateo", True), ("Foster City, CA", "Foster City", True),

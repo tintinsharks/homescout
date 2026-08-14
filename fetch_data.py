@@ -145,7 +145,6 @@ def load_city_limits():
 # cities covered whole-city via the HomeHarvest module (fetch_cities.py) —
 # recognized here by name so market_trends buckets their rows correctly
 CITY_POCKETS = {
-    "FREMONT": "Fremont", "UNION CITY": "Union City",
     "SAN CARLOS": "San Carlos", "BELMONT": "Belmont", "SAN MATEO": "San Mateo",
     "FOSTER CITY": "Foster City", "BURLINGAME": "Burlingame",
     "HILLSBOROUGH": "Hillsborough", "MILLBRAE": "Millbrae",

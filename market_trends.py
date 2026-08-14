@@ -71,9 +71,7 @@ def scope_of(pocket):
     buckets = []
     if pocket in fd.TARGET_POCKETS:
         buckets.append("Targets")
-    if pocket in ("Fremont", "Union City"):
-        buckets.append("East Bay")
-    elif pocket in ("Menlo Park", "West Menlo (county)"):
+    if pocket in ("Menlo Park", "West Menlo (county)"):
         buckets.append("Menlo Park")
     elif pocket in PENINSULA_OTHER:
         buckets.append("Peninsula (other)")
@@ -97,8 +95,7 @@ def main():
     over = defaultdict(lambda: defaultdict(list))       # month->scope->[0/1]
     pocket_ppsf = defaultdict(lambda: defaultdict(list))  # month->pocket->[$psf]
 
-    cities = ["Redwood City, CA", "Menlo Park, CA", "Atherton, CA",
-              "Fremont, CA", "Union City, CA"] + \
+    cities = ["Redwood City, CA", "Menlo Park, CA", "Atherton, CA"] + \
              sorted(c + ", CA" for c in PENINSULA_OTHER)
     for loc in cities:
         try:
@@ -145,7 +142,7 @@ def main():
 
     # ---- assemble monthly series + seasonality ----
     all_months = sorted(set(ppsf) | set(s2l))
-    scopes = ["Targets", "Redwood City", "Menlo Park", "Peninsula (other)", "East Bay"]
+    scopes = ["Targets", "Redwood City", "Menlo Park", "Peninsula (other)"]
     monthly = {s: [] for s in scopes}
     seas_acc = {s: defaultdict(lambda: defaultdict(list)) for s in scopes}  # scope->cal_month->metric->[vals]
 

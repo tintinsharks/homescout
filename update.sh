@@ -13,6 +13,11 @@ if [ ! -f docs/market.json ] || [ -z "$(find docs/market.json -mtime -1 2>/dev/n
   ./.venv/bin/python market_trends.py >> logs/fetch.log 2>&1 || echo "TRENDS FAILED (non-fatal)" >> logs/fetch.log
 fi
 
+# new-listing email alerts (diffs data.json vs last run's data.prev.json).
+# Runs with Aria's venv python — it carries the Gmail API libs + OAuth token.
+ARIA_PY="/Users/nprabhak/Claude Bot/personal-assistant/.venv/bin/python"
+[ -x "$ARIA_PY" ] && "$ARIA_PY" alert_new.py >> logs/fetch.log 2>&1 || echo "ALERT FAILED (non-fatal)" >> logs/fetch.log
+
 # stamp docs/index.html with a content-hash build id (ignoring the stamp line
 # itself) so the page auto-reloads clients ONLY when its code actually changes,
 # not on data-only refreshes.

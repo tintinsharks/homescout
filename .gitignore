@@ -5,3 +5,7 @@ logs/
 docs/data.prev.json
 __pycache__/
 *.pyc
+
+# local-only alert state (contains recipient emails / run ledger)
+alert_config.json
+alerted.json

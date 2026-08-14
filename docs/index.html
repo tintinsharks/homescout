@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="7fea6ffb3cadeb976b9653c1c7440c34">
+<meta name="build" content="fe69abffc5ecf78f1d9433b6db996af7">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -145,6 +145,27 @@
   .chartbox { position:relative; height:320px; }
   .empty { color:var(--muted); padding:22px; text-align:center; }
   .refresh { font-size:11px; color:var(--muted); margin-top:4px; }
+  /* Neighborhood Heat panel */
+  .heatpanel { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:16px 18px 18px; margin:0 0 4px; box-shadow:0 3px 14px rgba(58,42,32,.05); }
+  .heathead { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .heathead h2 { font-size:19px; margin:0; } .heathead h2 .hint { font-family:'Libre Franklin',sans-serif; font-weight:400; color:var(--muted); font-size:12px; }
+  .heatsort { display:flex; gap:6px; } .heatsort button { font-family:inherit; font-size:11.5px; border:1px solid var(--line); background:#fff; color:var(--muted); border-radius:8px; padding:4px 10px; cursor:pointer; }
+  .heatsort button.on { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700; }
+  .heatgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(215px,1fr)); gap:10px; }
+  .hcell { position:relative; border:1px solid var(--line); border-left:5px solid var(--hc,#a89b86); border-radius:11px; padding:10px 12px; cursor:pointer; background:#fff; transition:transform .08s, box-shadow .08s; overflow:hidden; }
+  .hcell:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(58,42,32,.10); }
+  .hcell.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  .hcell .hname { font-weight:700; font-size:13.5px; color:var(--ink); display:flex; align-items:center; gap:5px; }
+  .hcell .htemp { position:absolute; top:9px; right:10px; font-family:'Newsreader',serif; font-weight:600; font-size:22px; line-height:1; color:var(--hc,#a89b86); }
+  .hcell .hlabel { font-size:11px; color:var(--hc,#a89b86); font-weight:700; margin:1px 0 7px; }
+  .hcell .hstats { font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1.55; }
+  .hcell .hstats b { color:var(--ink); }
+  .hcell .hbadges { margin-top:6px; display:flex; flex-wrap:wrap; gap:4px; }
+  .hbadge { font-size:10px; font-weight:700; padding:1px 7px; border-radius:8px; }
+  .hbadge.tgt { background:#faf0dd; color:var(--accent); } .hbadge.gem { background:#e8f4ea; color:#2f7d43; }
+  .hbadge.deal { background:#e7f0f7; color:#3f6f8a; } .hbadge.thin { background:#f0ece3; color:var(--faint); }
+  .hbadge.act { background:#efe7d8; color:var(--muted); }
+  .heatnote { font-size:11px; color:var(--faint); margin-top:11px; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -202,6 +223,17 @@
   </aside>
 
   <main>
+    <section class="heatpanel" id="heatPanel">
+      <div class="heathead">
+        <h2>🌡️ Neighborhood Heat <span class="hint">— trailing 12mo sold comps · click a pocket to filter listings</span></h2>
+        <div class="heatsort">
+          <button id="heatHot" class="on">🔥 Hottest</button>
+          <button id="heatDeal">💧 Best deals</button>
+        </div>
+      </div>
+      <div class="heatgrid" id="heatGrid"></div>
+      <div class="heatnote" id="heatNote"></div>
+    </section>
     <div class="bid" id="bidStrip"></div>
 
     <div class="tabs" id="tabs">
@@ -364,6 +396,7 @@ function passFilters(h, isActive){
   return true;
 }
 state.minBeds = 0;
+state.heatSort = 'hot';
 
 // --- layout signal from MLS remarks: is this an open-concept reno play? -------
 // OPEN = flow already exists (little open-up upside). CLOSED = compartmentalized
@@ -790,6 +823,47 @@ function renderMarket(){
 }
 
 
+function renderHeat(){
+  const grid=$('heatGrid'), note=$('heatNote');
+  const H = MARKET && MARKET.neighborhood_heat;
+  if(!H || !Object.keys(H).length){ grid.innerHTML='<div class="empty" style="grid-column:1/-1">Heat data builds on the daily market refresh.</div>'; note.textContent=''; return; }
+  $('heatHot').classList.toggle('on',state.heatSort!=='deal');
+  $('heatDeal').classList.toggle('on',state.heatSort==='deal');
+  const act={}, gem={};
+  (DATA?DATA.active:[]).forEach(h=>{ if(/pending|contingent/i.test(h.status||''))return; act[h.pocket]=(act[h.pocket]||0)+1; if((dealScore(h)||0)>=8) gem[h.pocket]=(gem[h.pocket]||0)+1; });
+  const targets=new Set(DATA?DATA.target_pockets:[]);
+  let rows=Object.entries(H).map(([pk,d])=>Object.assign({pk,act:act[pk]||0,gem:gem[pk]||0,tgt:targets.has(pk)},d));
+  const dir = state.heatSort==='deal' ? -1 : 1;                 // hot → hottest first, deal → coldest first
+  rows.sort((a,b)=>dir*((b.temp??-1)-(a.temp??-1)) || (b.tgt-a.tgt) || (b.act-a.act));
+  grid.innerHTML = rows.map(d=>{
+    const col=tempColor(d.temp);
+    const sel = state.pockets.size===1 && state.pockets.has(d.pk);
+    const yoy = d.yoy==null?'':`· <span class="${d.yoy>=0?'pos':'neg'}">${d.yoy>=0?'+':''}${d.yoy}% yr</span>`;
+    const badges=[
+      d.tgt?'<span class="hbadge tgt">🎯 target</span>':'',
+      d.gem?`<span class="hbadge gem">💎 ${d.gem} gem${d.gem>1?'s':''}</span>`:'',
+      `<span class="hbadge act">${d.act} active</span>`,
+      (d.s2l!=null&&d.s2l<100)?'<span class="hbadge deal">under ask</span>':'',
+      d.n<10?`<span class="hbadge thin">n=${d.n}</span>`:''
+    ].filter(Boolean).join('');
+    return `<div class="hcell${sel?' sel':''}" style="--hc:${col}" data-pk="${encodeURIComponent(d.pk)}">
+      <div class="htemp">${d.temp??'—'}</div>
+      <div class="hname">${d.pk}</div>
+      <div class="hlabel">${tempLabel(d.temp)}</div>
+      <div class="hstats"><b>${d.median?fmtK(d.median):'—'}</b> med · <b>$${d.ppsf||'—'}</b>/sf ${yoy}<br>${d.s2l!=null?d.s2l+'% s2l':'—'} · ${d.over!=null?d.over+'% over':'—'} · ${d.dom!=null?d.dom+'d':'—'} · ${d.n} sold</div>
+      <div class="hbadges">${badges}</div>
+    </div>`;
+  }).join('');
+  grid.querySelectorAll('.hcell').forEach(el=>el.onclick=()=>{
+    const pk=decodeURIComponent(el.dataset.pk);
+    if(state.pockets.size===1 && state.pockets.has(pk)){ state.pockets.clear(); }
+    else { state.pockets.clear(); state.pockets.add(pk); state.region=''; }
+    renderAll();
+    document.getElementById('feed').scrollIntoView({behavior:'smooth',block:'start'});
+  });
+  note.innerHTML=`Temperature = 0–100 blend of sale-to-list %, % over asking &amp; days-on-market (100 = frenzied seller's market). $/sqft <b>yr</b> compares the last 12mo to the prior 12mo. <b>n</b> = sold count; pockets under 10 are directional. Active/gem counts are live.`;
+}
+
 function renderAll(){
   document.querySelectorAll('#tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset.r===state.region));
   document.querySelectorAll('#tabs .sbtn').forEach(b=>{ const on=b.dataset.s===state.sort; b.classList.toggle('on',on); b.textContent=b.dataset.s+(on?(state.sortDir==='asc'?' ↑':' ↓'):''); });
@@ -807,7 +881,7 @@ function renderAll(){
   $('priceLab').textContent=fmtK(+$('fMin').value)+' – '+fmtK(+$('fPrice').value);
   const ms=+$('fMinScore').value; $('scoreLab').textContent = ms<=-35 ? 'any' : (ms>0?'+':'')+ms+' or better';
   saveFilters();
-  renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderCharts(); renderMarket(); renderSoldTable();
+  renderHeat(); renderAreas(); renderBid(); renderFeed(); renderRailTemp(); renderCharts(); renderMarket(); renderSoldTable();
 }
 function saveFilters(){
   try{ localStorage.setItem('hs_filters', JSON.stringify({
@@ -873,6 +947,8 @@ $('chipOpen').onclick=()=>{state.openOnly=!state.openOnly;renderAll();};
 $('chipHaz').onclick=()=>{state.avoidHaz=!state.avoidHaz;renderAll();};
 $('chipPending').onclick=()=>{state.showPending=!state.showPending;renderAll();};
 $('chipLots').onclick=()=>{state.showLots=!state.showLots;renderAll();};
+$('heatHot').onclick=()=>{state.heatSort='hot';renderHeat();};
+$('heatDeal').onclick=()=>{state.heatSort='deal';renderHeat();};
 ['fMin','fPrice','fSqft','fYearMin','fMinScore','fDown','fRate'].forEach(id=>$(id).oninput=renderAll);
 $('mktScope').onchange=renderMarket; $('tRange').onchange=renderCharts;
 restoreFilters();

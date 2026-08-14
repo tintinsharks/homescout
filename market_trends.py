@@ -94,6 +94,12 @@ def main():
     s2l = defaultdict(lambda: defaultdict(list))        # month->scope->[ratio%]
     over = defaultdict(lambda: defaultdict(list))       # month->scope->[0/1]
     pocket_ppsf = defaultdict(lambda: defaultdict(list))  # month->pocket->[$psf]
+    # per-pocket monthly accumulators for the Neighborhood Heat panel
+    p_s2l = defaultdict(lambda: defaultdict(list))        # month->pocket->[ratio%]
+    p_over = defaultdict(lambda: defaultdict(list))       # month->pocket->[0/1]
+    p_dom = defaultdict(lambda: defaultdict(list))        # month->pocket->[days]
+    p_price = defaultdict(lambda: defaultdict(list))      # month->pocket->[$]
+    p_n = defaultdict(lambda: defaultdict(int))           # month->pocket->count
 
     cities = ["Redwood City, CA", "Menlo Park, CA", "Atherton, CA"] + \
              sorted(c + ", CA" for c in PENINSULA_OTHER)
@@ -118,6 +124,8 @@ def main():
             mk = month_key(str(sold)[:10])
             scopes_hit = scope_of(pocket)
             sqft = fd.to_int(r.get("sqft"))
+            p_n[mk][pocket] += 1
+            p_price[mk][pocket].append(sp)
             if sqft and sqft >= 1500:
                 p = round(sp / sqft)
                 if 150 <= p <= 4000:
@@ -131,11 +139,14 @@ def main():
             if lp and lp > 0:
                 ratio = sp / lp * 100
                 if 70 <= ratio <= 150:      # drop obvious data errors
+                    p_s2l[mk][pocket].append(round(ratio, 1))
+                    p_over[mk][pocket].append(1 if sp > lp else 0)
                     for scope in scopes_hit:
                         s2l[mk][scope].append(round(ratio, 1))
                         over[mk][scope].append(1 if sp > lp else 0)
             dm = fd.to_int(r.get("days_on_mls"))
             if dm is not None and 0 <= dm <= 400:
+                p_dom[mk][pocket].append(dm)
                 for scope in scopes_hit:
                     dom[mk][scope].append(dm)
         time.sleep(2)
@@ -184,6 +195,46 @@ def main():
     # keep only pockets with enough history to chart meaningfully
     pocket_series = {p: v for p, v in pocket_series.items() if len(v) >= 12}
 
+    # ---- Neighborhood Heat: trailing-12mo per-pocket snapshot ----
+    # temperature + sale-to-list + over-ask + DOM + median price/$psf and a
+    # YoY $/sqft change (last 12mo median vs the prior 12mo). Feeds the panel.
+    def midx(mk):                      # 'YYYY-MM' -> absolute month index
+        return int(mk[:4]) * 12 + int(mk[5:7])
+
+    heat = {}
+    if all_months:
+        latest = midx(max(all_months))
+        last12 = {mk for mk in set(p_n) if latest - 11 <= midx(mk) <= latest}
+        prior12 = {mk for mk in set(p_n) if latest - 23 <= midx(mk) <= latest - 12}
+        pockets = {pk for mk in last12 for pk in p_n[mk]}
+        for pk in pockets:
+            n = sum(p_n[mk].get(pk, 0) for mk in last12)
+            if n < 3:                  # too thin to characterise
+                continue
+            s2l_v = [v for mk in last12 for v in p_s2l[mk].get(pk, [])]
+            over_v = [v for mk in last12 for v in p_over[mk].get(pk, [])]
+            dom_v = [v for mk in last12 for v in p_dom[mk].get(pk, [])]
+            price_v = [v for mk in last12 for v in p_price[mk].get(pk, [])]
+            ppsf_v = [v for mk in last12 for v in pocket_ppsf[mk].get(pk, [])]
+            ppsf_prior = [v for mk in prior12 for v in pocket_ppsf[mk].get(pk, [])]
+            m_s2l = med(s2l_v)
+            m_over = round(sum(over_v) / len(over_v) * 100) if over_v else None
+            m_dom = med(dom_v)
+            now_ppsf = med(ppsf_v)
+            was_ppsf = med(ppsf_prior)
+            yoy = (round((now_ppsf - was_ppsf) / was_ppsf * 100)
+                   if now_ppsf and was_ppsf else None)
+            heat[pk] = {
+                "n": n,
+                "median": int(st.median(price_v)) if price_v else None,
+                "ppsf": int(now_ppsf) if now_ppsf else None,
+                "yoy": yoy,
+                "s2l": m_s2l,
+                "over": m_over,
+                "dom": m_dom,
+                "temp": temperature(m_s2l, m_over, m_dom),
+            }
+
     out = {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "scopes": scopes,
@@ -191,6 +242,7 @@ def main():
         "seasonality": seasonality,
         "current_temp": current,
         "pocket_ppsf": pocket_series,
+        "neighborhood_heat": heat,
     }
     (DOCS / "market.json").write_text(json.dumps(out, separators=(",", ":")))
     print(f"wrote docs/market.json: {len(all_months)} months, "

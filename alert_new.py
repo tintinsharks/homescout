@@ -144,16 +144,44 @@ def build_email(new, cfg):
 
 
 def build_sms(new):
-    """Short plain-text summary for Signal/SMS (keep it compact)."""
+    """Short plain-text summary for SMS gateways (carriers truncate ~160 chars,
+    so keep it tight and ASCII — no emoji/HTML)."""
     n = len(new)
-    lines = [f"🏡 HomeScout: {n} new listing{'s' if n != 1 else ''}"]
-    for h in new[:5]:
-        tag = "🎯" if h.get("target") else "•"
-        lines.append(f"{tag} {fmt_price(h.get('price'))} {h.get('address', '')} ({h.get('pocket', '')})")
-    if n > 5:
-        lines.append(f"…+{n - 5} more")
-    lines.append(DASH)
+    lines = [f"HomeScout: {n} new listing{'s' if n != 1 else ''}"]
+    for h in new[:3]:
+        tag = "*" if h.get("target") else "-"
+        lines.append(f"{tag} {fmt_price(h.get('price'))} {h.get('address', '')}")
+    if n > 3:
+        lines.append(f"+{n - 3} more")
+    lines.append("tintinsharks.github.io/homescout")
     return "\n".join(lines)
+
+
+def send_sms_email(text, addresses):
+    """Send a PLAIN-TEXT email to carrier email-to-SMS gateways (@vtext.com,
+    @tmomail.net, ...). Reuses the same Gmail credentials as send()."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+    from email.mime.text import MIMEText
+    import base64
+
+    creds = Credentials.from_authorized_user_file(str(TOKEN), [GMAIL_SEND])
+    if not creds.valid:
+        creds.refresh(Request())
+    svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
+    sent = []
+    for addr in addresses:
+        try:
+            msg = MIMEText(text, "plain")
+            msg["To"] = addr
+            msg["Subject"] = ""          # gateways put the body in the SMS, not the subject
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+            sent.append(addr)
+        except Exception as e:
+            print(f"sms gateway {addr} failed: {e}", file=sys.stderr)
+    return sent
 
 
 def send_signal(text, numbers):
@@ -236,10 +264,18 @@ def main():
     else:
         print(f"{len(new)} new listings but no email recipients configured", file=sys.stderr)
 
-    sms_nums = [n for n in cfg.get("signal_recipients", []) if n]
-    if sms_nums:
-        sent = send_signal(build_sms(new), sms_nums)
-        print(f"texted {len(new)} new listings via Signal to {', '.join(sent) or '(none)'}")
+    sig_nums = [n for n in cfg.get("signal_recipients", []) if n]
+    if sig_nums:
+        sent = send_signal(build_sms(new), sig_nums)
+        print(f"texted {len(new)} via Signal to {', '.join(sent) or '(none)'}")
+
+    sms_addrs = [a for a in cfg.get("sms_recipients", []) if a and "@" in a]
+    if sms_addrs:
+        try:
+            sent = send_sms_email(build_sms(new), sms_addrs)
+            print(f"SMS {len(new)} new listings to {', '.join(sent) or '(none)'}")
+        except Exception as e:
+            print(f"sms send failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

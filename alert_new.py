@@ -153,7 +153,7 @@ def build_sms(new):
         lines.append(f"{tag} {fmt_price(h.get('price'))} {h.get('address', '')}")
     if n > 3:
         lines.append(f"+{n - 3} more")
-    lines.append("tintinsharks.github.io/homescout")
+    lines.append(DASH)          # full https:// URL so SMS auto-linkers keep the /homescout path
     return "\n".join(lines)
 
 
@@ -198,6 +198,33 @@ def send_signal(text, numbers):
         except Exception as e:
             print(f"signal send to {num} failed: {e}", file=sys.stderr)
     return sent
+
+
+def signal_note(text):
+    """Signal note-to-self — independent of the Gmail token, so it still works
+    when the token has lapsed. Used as a dead-man's alarm."""
+    import subprocess
+    try:
+        subprocess.run(["/opt/homebrew/bin/signal-cli", "send", "--note-to-self", "-m", text],
+                       check=True, capture_output=True, timeout=60)
+        return True
+    except Exception as e:
+        print(f"signal note failed: {e}", file=sys.stderr)
+        return False
+
+
+def gmail_ok():
+    """True if the Gmail token is usable (valid or refreshable)."""
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        c = Credentials.from_authorized_user_file(str(TOKEN), [GMAIL_SEND])
+        if not c.valid:
+            c.refresh(Request())
+        return bool(c.valid)
+    except Exception as e:
+        print(f"gmail token check failed: {e}", file=sys.stderr)
+        return False
 
 
 def send(sub, html, recipients):
@@ -253,6 +280,16 @@ def main():
         print("no new listings this run")
         return
     new.sort(key=lambda h: (not h.get("target"), -((deal_score(h) or -99)), h.get("price") or 0))
+
+    # dead-man's alarm: if the Gmail token has lapsed, both email and SMS-gateway
+    # are down — warn via Signal (token-independent) instead of failing silently.
+    uses_gmail = bool(recipients) or bool([a for a in cfg.get("sms_recipients", []) if a])
+    if uses_gmail and not gmail_ok():
+        signal_note(f"⚠️ HomeScout: Gmail token expired — email + text alerts are DOWN "
+                    f"({len(new)} new listing(s) not sent). Re-authorize and Publish the OAuth app.")
+        print("gmail token unusable; sent Signal warning, skipping email/SMS", file=sys.stderr)
+        recipients = []
+        cfg = {**cfg, "sms_recipients": []}
 
     if recipients:
         sub, html = build_email(new, cfg)

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Cache-Control" content="no-cache">
-<meta name="build" content="24ccb7db97367b7b465bafbee9a61aed">
+<meta name="build" content="c99a36071ea47cd50d1ee56c05b0048c">
 <title>Home Scout</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏡</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -470,17 +470,23 @@ function pfVerdict(h){
     let exit = (bd&&bd.ppsf75) || h.reno_bench || (med?Math.round(med*1.15):0);
     if(med) exit=Math.min(exit, med*1.6);   // renovated resale rarely tops ~1.6× pocket median $/sqft; rejects estate-comp noise
     if(exit){
-      const lay=pfLayout(h), rate = lay==='open' ? 130 : pfUpdated(h) ? 210 : 320;
+      // new construction has nothing to renovate — verdict is just price vs
+      // what the pocket supports (191 Grand St, built 2026, was reading as
+      // "dated — full modernization")
+      const nb = (h.year && h.year >= new Date().getFullYear()-1) ||
+                 /new construction|newly (?:built|constructed)|brand[- ]new (?:construction|build|home)/i.test(h.remarks||'');
+      const lay=pfLayout(h), rate = nb ? 0 : lay==='open' ? 130 : pfUpdated(h) ? 210 : 320;
       const reno=h.sqft*rate, allin=h.price+reno, worth=h.sqft*exit, m=(worth-allin)/allin;
       const g = m>=0.05 ? {k:'tour',ic:'🟢',lab:'TOUR',c:'#3c7d54',rk:3}
               : m>=-0.10 ? {k:'maybe',ic:'🟡',lab:'MAYBE',c:'#a3752a',rk:2}
               : {k:'skip',ic:'🔴',lab:'SKIP',c:'#b0472a',rk:1};
       const rnd=(x,s)=>Math.round(x/s)*s;
       const verb = lay==='open' ? 'refresh finishes' : 'open up + modernize';
-      const cond = lay==='open' ? 'already open-concept' : pfUpdated(h) ? 'already updated — mostly walls + kitchen' : 'dated — full modernization';
+      const cond = nb ? 'new construction — move-in ready' : lay==='open' ? 'already open-concept' : pfUpdated(h) ? 'already updated — mostly walls + kitchen' : 'dated — full modernization';
       const tail = g.k==='tour' ? 'builds equity' : g.k==='skip' ? 'priced above what the block supports once done' : '≈ what it costs to build your own';
       v={...g, m, worth, allin,
-         line:`buy ${fmtK(rnd(h.price,50000))}, ~${fmtK(rnd(reno,25000))} to ${verb}, worth ${fmtK(rnd(worth,50000))} done`,
+         line: nb ? `buy ${fmtK(rnd(h.price,50000))} move-in ready, pocket comps support ${fmtK(rnd(worth,50000))}`
+                  : `buy ${fmtK(rnd(h.price,50000))}, ~${fmtK(rnd(reno,25000))} to ${verb}, worth ${fmtK(rnd(worth,50000))} done`,
          reason:`${cond} · ${tail}`};
     }
   }

@@ -228,7 +228,10 @@ def slim(data):
             h["lon"] = round(h["lon"], 4)
     for h in data["active"]:
         if h.get("remarks"):
-            h["remarks"] = h["remarks"][:280]
+            # keep the full 500 enrich stores: the page's layout/updated regexes
+            # run on this text, and 280 cut off signals like "open-concept floor
+            # plan" (191 Grand St read as "dated" because of it)
+            h["remarks"] = h["remarks"][:500]
         if h.get("comps"):
             h["comps"] = h["comps"][:4]
 

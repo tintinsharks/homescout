@@ -53,14 +53,14 @@ def passes_gate(h, cfg):
         allow = {c.strip().lower() for c in cities}
         if (h.get("city") or "").strip().lower() not in allow:
             return False
-    if h.get("target"):                      # target pockets bypass price/sqft gates
+    price = h.get("price") or 0
+    if cfg.get("max_price") and price > cfg["max_price"]:   # HARD ceiling — applies to targets too
+        return False
+    if h.get("target"):                      # target pockets bypass only the sqft/lot gates
         return True
     if cfg.get("targets_only"):
         return False
     if h.get("type") == "lot" and not cfg.get("include_lots", True):
-        return False
-    price = h.get("price") or 0
-    if cfg.get("max_price") and price > cfg["max_price"]:
         return False
     sqft = h.get("sqft")
     if h.get("type") != "lot" and cfg.get("min_sqft") and sqft and sqft < cfg["min_sqft"]:
